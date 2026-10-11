@@ -6,7 +6,8 @@
                                    compiling; the REPL keeps a quarter of it for code)
      REPL compiler tables  32 KB  (only while a REPL session is open)
      screen                75 KB  (one buffer so far; the DMA copy for video adds another 75 KB)
-     rio's interpreter     10 KB  (its loop runs from SRAM: see RIM_RIO_IN_RAM) */
+     rio's interpreter     10 KB  (its loop runs from SRAM: see RIM_RIO_IN_RAM)
+     native loops          16 KB  (rio_jit: loops of integer math compiled to Thumb-2) */
 #include <stdio.h>
 #include "pico/stdlib.h"
 #include "hardware/clocks.h"
@@ -16,6 +17,7 @@
 #define REPL_SCRATCH (32 << 10)
 
 static _Alignas(16) uint8_t rio_mem[RIO_MEM];
+static _Alignas(8) uint8_t jit_code[16 << 10]; /* simple loops, compiled to machine code (SRAM runs code) */
 static _Alignas(16) uint8_t repl_scratch[REPL_SCRATCH];
 static Rio vm;
 static RimRepl repl;
@@ -28,7 +30,7 @@ int main(void) {
   stdio_init_all();
   while (!stdio_usb_connected()) sleep_ms(50); /* wait for a terminal on the USB serial port */
   rim_time = now;
-  if (rim_start(&vm, rio_mem, sizeof rio_mem, put) || rim_repl_begin(&repl, &vm, repl_scratch, sizeof repl_scratch)) {
+  if (rim_start(&vm, rio_mem, sizeof rio_mem, put) || rio_jit(&vm, jit_code, sizeof jit_code) < 0 || rim_repl_begin(&repl, &vm, repl_scratch, sizeof repl_scratch)) {
     printf("rim: can't start: %s\r\n", rio_error(&vm));
     for (;;) sleep_ms(1000);
   }
