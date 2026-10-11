@@ -1,0 +1,112 @@
+# Breakout: the arrow keys move the paddle, Z or X serves. Clear every brick.
+COLS :: 10
+ROWS :: 6
+PADW :: 40
+
+Ball :: struct
+  x, y, dx, dy: Float
+end
+
+bricks: [60]Int # ROWS * COLS, by row: a brick's color, or 0 once it's hit
+ball := Ball{x = 160.0, y = 200.0}
+padx := 140.0
+serving := true
+score := 0
+lives := 3
+left := 0
+text: Blob[..48]
+
+reset :: proc()
+  for r in 0..<ROWS
+    for c in 0..<COLS
+      bricks[r * COLS + c] = 8 + r
+    end
+  end
+  left = ROWS * COLS
+  score = 0
+  lives = 3
+  serving = true
+end
+reset()
+
+pressed :: proc() -> Bool
+  return btn(4) == 1 or btn(5) == 1
+end
+
+update* :: proc()
+  if lives == 0 or left == 0
+    if pressed()
+      reset()
+    end
+    return
+  end
+  if btn(0) == 1
+    padx -= 4.0
+  end
+  if btn(1) == 1
+    padx += 4.0
+  end
+  padx = max(0.0, min(padx, 320.0 - PADW.toFloat()))
+  if serving
+    ball = Ball{x = padx + 20.0, y = 222.0}
+    if pressed()
+      serving = false
+      ball.dx = 1.5
+      ball.dy = -2.5
+    end
+    return
+  end
+  ball.x += ball.dx
+  ball.y += ball.dy
+  if ball.x < 2.0 or ball.x > 318.0
+    ball.dx = -ball.dx
+    ball.x = max(2.0, min(ball.x, 318.0))
+  end
+  if ball.y < 2.0
+    ball.dy = abs(ball.dy)
+  end
+  # the paddle: where it's hit steers the ball
+  if ball.dy > 0.0 and ball.y >= 224.0 and ball.y <= 230.0 and ball.x >= padx - 2.0 and ball.x <= padx + 42.0
+    ball.dy = -ball.dy
+    ball.dx = (ball.x - padx - 20.0) / 8.0
+  end
+  if ball.y > 242.0
+    lives -= 1
+    serving = true
+  end
+  # bricks: 30x10, 31 apart across from x 5, 12 apart down from y 30
+  if ball.x >= 5.0 and ball.y >= 30.0
+    c := ((ball.x - 5.0) / 31.0).toInt()
+    r := ((ball.y - 30.0) / 12.0).toInt()
+    if c < COLS and r < ROWS and bricks[r * COLS + c] != 0
+      bricks[r * COLS + c] = 0
+      ball.dy = -ball.dy
+      score += 10
+      left -= 1
+    end
+  end
+end
+
+draw* :: proc()
+  cls(1)
+  for r in 0..<ROWS
+    for c in 0..<COLS
+      k := bricks[r * COLS + c]
+      if k != 0
+        rect(5 + c * 31, 30 + r * 12, 30, 10, k)
+      end
+    end
+  end
+  rect(padx.toInt(), 226, PADW, 4, 7)
+  rect(ball.x.toInt() - 2, ball.y.toInt() - 2, 4, 4, 10)
+  text.clear()
+  ok := text.format("SCORE ", score, "   LIVES ", lives)
+  print(text[:].asString(), 4, 4, 7)
+  if left == 0
+    print("YOU WIN!  Z to play again", 85, 120, 11)
+  else if lives == 0
+    print("GAME OVER  Z to play again", 82, 120, 8)
+  else if serving
+    print("Z to serve", 130, 150, 6)
+  end
+end

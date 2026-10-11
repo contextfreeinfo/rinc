@@ -4,6 +4,7 @@
 _Alignas(4) uint8_t rim_screen[RIM_H][RIM_W]; /* (aligned for DMA) */
 uint16_t rim_palette[256];
 float (*rim_time)(void);
+uint8_t rim_buttons;
 static void (*rim_put)(const char *s, int n);
 
 static uint16_t rgb565(int r, int g, int b) { return (uint16_t)((r >> 3) << 11 | (g >> 2) << 5 | b >> 3); }
@@ -39,6 +40,12 @@ static void h_rect(Rio *v, RioVal *a) {
   if (y1 > RIM_H) y1 = RIM_H;
   for (y = y0; y < y1 && x0 < x1; y++) memset(&rim_screen[y][x0], (uint8_t)a[4].i, (size_t)(x1 - x0));
 }
+static void h_print(Rio *v, RioVal *a) { /* print(s, x, y, c): text at pixel x, y */
+  const char *s = (const char *)rio_ptr(v, a); int i, x = a[2].i, y = a[3].i;
+  if (!s) return;
+  for (i = 0; i < a[1].i; i++, x += 6) rim_char((unsigned char)s[i], x, y, a[4].i & 255, -1);
+}
+static void h_btn(Rio *v, RioVal *a) { (void)v; a[0].i = a[0].u < 8 ? rim_buttons >> a[0].i & 1 : 0; }
 static void h_time(Rio *v, RioVal *a) { (void)v; a[0].f = rim_time ? rim_time() : 0; }
 
 static void log_line(void *ud, const char *s, int n) { (void)ud; rim_put(s, n); rim_put("\r\n", 2); }
@@ -49,19 +56,33 @@ int rim_start(Rio *vm, void *mem, uint32_t memsize, void (*put)(const char *s, i
   if (rio_init(vm, mem, memsize, 0, 0)) return -1; /* no code buffer: the code goes in mem too */
   rio_set_log(vm, log_line, 0);
   if (rio_ffi(vm, "cls", "i", h_cls) || rio_ffi(vm, "pset", "iii", h_pset) || rio_ffi(vm, "pget", "ii>i", h_pget) ||
-      rio_ffi(vm, "rect", "iiiii", h_rect) || rio_ffi(vm, "time", ">f", h_time)) return -1;
+      rio_ffi(vm, "rect", "iiiii", h_rect) || rio_ffi(vm, "print", "siii", h_print) || rio_ffi(vm, "btn", "i>i", h_btn) || rio_ffi(vm, "time", ">f", h_time)) return -1;
   return 0;
 }
 
 /* the REPL: lines gather until rio has a complete input; a blank line gives up on an unfinished one */
+int rim_frame(Rio *vm) {
+  int u = rio_func(vm, "update"), d = rio_func(vm, "draw");
+  if (u < 0 && d < 0) return 1;
+  if (u >= 0 && rio_call(vm, u)) return -1;
+  if (d >= 0 && rio_call(vm, d)) return -1;
+  return 0;
+}
+
 static void prompt(RimRepl *r) { r->put(r->n ? ".. " : "> ", r->n ? 3 : 2); }
 
 int rim_repl_begin(RimRepl *r, Rio *vm, void *scratch, uint32_t size) {
-  r->vm = vm; r->put = rim_put; r->n = r->line0 = 0; r->echo = 1;
+  r->vm = vm; r->put = rim_put; r->n = r->line0 = 0; r->echo = 1; r->run = 0;
   if (rio_repl_begin(vm, scratch, size, 0)) return -1;
   r->put("Rim: rio REPL\r\n", 15);
   prompt(r);
   return 0;
+}
+
+void rim_repl_stop(RimRepl *r, const char *why) {
+  r->run = 0;
+  if (why) { r->put(why, (int)strlen(why)); r->put("\r\n", 2); }
+  prompt(r);
 }
 
 void rim_repl_char(RimRepl *r, int c) {
@@ -69,6 +90,7 @@ void rim_repl_char(RimRepl *r, int c) {
     int res;
     if (r->echo) r->put("\r\n", 2);
     if (r->n && r->n == r->line0) { r->put("(unfinished input dropped)\r\n", 28); r->n = r->line0 = 0; prompt(r); return; }
+    if (!r->line0 && r->n == 3 && !memcmp(r->acc, "run", 3)) { r->n = 0; r->run = 1; return; } /* the platform takes it from here */
     if (r->n >= (int)sizeof r->acc - 1) { r->put("(input too long)\r\n", 18); r->n = r->line0 = 0; prompt(r); return; }
     r->acc[r->n++] = '\n';
     res = rio_repl_eval(r->vm, r->acc, (uint32_t)r->n);
