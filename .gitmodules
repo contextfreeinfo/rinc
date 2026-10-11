@@ -1,0 +1,4 @@
+[submodule "lib/rio"]
+	path = lib/rio
+	url = git@github.com:contextfreeinfo/rio.git
+	branch = vibe
