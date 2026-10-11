@@ -13,9 +13,10 @@ extern uint8_t rim_screen[RIM_H][RIM_W]; /* 8 bits per pixel: an index into rim_
 extern uint16_t rim_palette[256];        /* RGB565: the PICO-8 16, a 6x6x6 color cube, 24 grays */
 extern float (*rim_time)(void);          /* seconds since start, from the platform */
 
-/* set up rio in the given memory, with log output going to put and the host procs carts call:
-   cls(c), pset(x, y, c), pget(x, y) -> c, rect(x, y, w, h, c), time() -> Float */
-int rim_start(Rio *vm, void *mem, uint32_t memsize, RioIns *code, uint32_t codecap, void (*put)(const char *s, int n));
+/* set up rio in the given memory (the app space: code and data both live there), with log output
+   going to put and the host procs carts call: cls(c), pset(x, y, c), pget(x, y) -> c,
+   rect(x, y, w, h, c), time() -> Float */
+int rim_start(Rio *vm, void *mem, uint32_t memsize, void (*put)(const char *s, int n));
 
 /* a REPL over any text stream: feed it characters, it echoes them and runs each complete input */
 typedef struct {

@@ -42,11 +42,21 @@ endif()
 
 if(RIM_PLATFORM STREQUAL rp2350)
   target_compile_definitions(riocore PUBLIC RIO_SMALL) # MCU-sized fixed caps
+  option(RIM_RIO_IN_RAM "run rio's interpreter loop from SRAM instead of flash" ON)
+  if(RIM_RIO_IN_RAM)
+    target_compile_definitions(riocore PRIVATE RIO_HOT_SECTION=".time_critical.rio")
+  endif()
   add_executable(rim src/rp2350/main.c)
   target_link_libraries(rim PRIVATE rimcore pico_stdlib)
   pico_enable_stdio_usb(rim 1)  # the REPL talks over USB serial
   pico_enable_stdio_uart(rim 0)
   pico_add_extra_outputs(rim)   # rim.uf2, to drop on the board in BOOT mode
+  # cmake --build build --target flash: picotool reboots a running rim (or anything else built with
+  # USB stdio) into BOOT mode over USB, writes rim, and starts it. A board that isn't answering on USB
+  # needs BOOT + RESET by hand first.
+  if(TARGET picotool)
+    add_custom_target(flash COMMAND picotool load -f -x $<TARGET_FILE:rim> DEPENDS rim USES_TERMINAL)
+  endif()
 else()
   add_executable(rim src/desktop/main.c)
   target_link_libraries(rim PRIVATE rimcore)

@@ -43,10 +43,10 @@ static void h_time(Rio *v, RioVal *a) { (void)v; a[0].f = rim_time ? rim_time() 
 
 static void log_line(void *ud, const char *s, int n) { (void)ud; rim_put(s, n); rim_put("\r\n", 2); }
 
-int rim_start(Rio *vm, void *mem, uint32_t memsize, RioIns *code, uint32_t codecap, void (*put)(const char *s, int n)) {
+int rim_start(Rio *vm, void *mem, uint32_t memsize, void (*put)(const char *s, int n)) {
   rim_put = put;
   init_palette();
-  if (rio_init(vm, mem, memsize, code, codecap)) return -1;
+  if (rio_init(vm, mem, memsize, 0, 0)) return -1; /* no code buffer: the code goes in mem too */
   rio_set_log(vm, log_line, 0);
   if (rio_ffi(vm, "cls", "i", h_cls) || rio_ffi(vm, "pset", "iii", h_pset) || rio_ffi(vm, "pget", "ii>i", h_pget) ||
       rio_ffi(vm, "rect", "iiiii", h_rect) || rio_ffi(vm, "time", ">f", h_time)) return -1;

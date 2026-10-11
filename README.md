@@ -54,10 +54,10 @@ When a rio change is pushed, move the submodule to it: `git -C lib/rio pull` and
 
 ## Memory on the RP2350
 
-Of 520 KB of SRAM: rio gets 256 KB (it compiles inside the same memory, so nothing extra is needed
-for the compiler), the screen and its DMA copy for video take 150 KB, and the rest is for the system.
-Rio's bytecode (8 bytes an instruction) will likely live in PSRAM. Run `rio -m cart.rio` on the desktop
-to see where a cart's memory goes.
+Of 520 KB of SRAM: apps get 256 KB, for their code and data both (rio compiles inside the same
+memory, so nothing extra is needed for the compiler, and the code takes only its own size), the
+screen and its DMA copy for video take 150 KB, and the rest is for the system. No PSRAM needed.
+Run `rio -m cart.rio` on the desktop to see where a cart's memory goes.
 
 ## License
 

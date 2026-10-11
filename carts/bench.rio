@@ -1,0 +1,54 @@
+# timings on the board: paste into the REPL, or run as a cart
+P :: struct
+  x: Float
+  y: Float
+  vx: Float
+  vy: Float
+end
+ps: [500]P
+sq :: proc(x: Int) -> Int
+  return x * x + 1
+end
+bench :: proc()
+  t := time()
+  n := 0
+  for i in 0..<1000000
+    n += i % 7
+  end
+  log("loop 1M:", time() - t)
+  t = time()
+  for i in 0..<300000
+    n += sq(i)
+  end
+  log("calls 300k:", time() - t)
+  for p, i in ps
+    p.x = i.toFloat()
+    p.vx = 1.5
+    p.vy = -0.5
+  end
+  t = time()
+  for step in 0..<100
+    for p in ps
+      p.x += p.vx
+      p.y += p.vy
+      if p.y < 0.0
+        p.vy = -p.vy
+      end
+    end
+  end
+  log("particles 500x100:", time() - t)
+  t = time()
+  f := 0.0
+  for i in 0..<100000
+    f += sin(i.toFloat() * 0.01)
+  end
+  log("sin 100k:", time() - t)
+  t = time()
+  for y in 0..<240
+    for x in 0..<320
+      pset(x, y, (x + y) % 16)
+    end
+  end
+  log("pset 76.8k:", time() - t, n)
+end
+bench()

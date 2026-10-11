@@ -10,7 +10,6 @@
 #include "rim.h"
 
 static uint8_t rio_mem[1 << 20], repl_scratch[1 << 18];
-static RioIns rio_code[1 << 16];
 static char src[1 << 20];
 static Rio vm;
 static RimRepl repl;
@@ -41,7 +40,7 @@ int main(int argc, char **argv) {
     else cart = argv[i];
   }
   t0 = clock(); rim_time = now;
-  if (rim_start(&vm, rio_mem, sizeof rio_mem, rio_code, 1 << 16, put)) { fprintf(stderr, "rim: can't start\n"); return 1; }
+  if (rim_start(&vm, rio_mem, sizeof rio_mem, put)) { fprintf(stderr, "rim: can't start\n"); return 1; }
   if (cart) {
     FILE *f = fopen(cart, "rb"); size_t n;
     if (!f) { fprintf(stderr, "rim: can't open %s\n", cart); return 2; }
