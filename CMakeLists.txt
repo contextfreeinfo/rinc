@@ -38,7 +38,7 @@ if(RIM_PLATFORM STREQUAL rp2350)
 endif()
 
 include(${RIO_DIR}/library.cmake)
-add_library(rimcore STATIC src/core/rim.c src/core/console.c src/core/font.c)
+add_library(rimcore STATIC src/core/rim.c src/core/console.c src/core/font.c src/core/audio.c)
 target_include_directories(rimcore PUBLIC src/core)
 target_link_libraries(rimcore PUBLIC riocore)
 if(NOT MSVC)
@@ -46,7 +46,7 @@ if(NOT MSVC)
 endif()
 
 if(RIM_PLATFORM STREQUAL rp2350)
-  target_compile_definitions(riocore PUBLIC RIO_SMALL) # MCU-sized fixed caps
+  target_compile_definitions(riocore PUBLIC RIO_SMALL RIO_MAX_FFI=64) # MCU-sized fixed caps, but room for Rim's host procs
   option(RIM_RIO_IN_RAM "run rio's interpreter loop from SRAM instead of flash" ON)
   if(RIM_RIO_IN_RAM)
     target_compile_definitions(riocore PRIVATE RIO_HOT_SECTION=".time_critical.rio")
@@ -55,11 +55,13 @@ if(RIM_PLATFORM STREQUAL rp2350)
   # sources compiled here (tinyusb_host would turn the native port into a host too: it stays a device,
   # for the serial port); tusb_config.h in src/rp2350 configures both
   set(TUSB ${PICO_SDK_PATH}/lib/tinyusb/src)
-  add_executable(rim src/rp2350/main.c src/rp2350/video.c src/rp2350/keyboard.c
+  add_executable(rim src/rp2350/main.c src/rp2350/video.c src/rp2350/keyboard.c src/rp2350/audio.c
     ${TUSB}/host/usbh.c ${TUSB}/host/hub.c ${TUSB}/class/hid/hid_host.c ${TUSB}/portable/raspberrypi/pio_usb/hcd_pio_usb.c)
   target_include_directories(rim BEFORE PRIVATE src/rp2350)
   target_compile_definitions(rim PRIVATE PICO_STACK_SIZE=0x1000 PICO_CORE1_STACK_SIZE=0x800)
-  target_link_libraries(rim PRIVATE rimcore pico_stdlib pico_multicore hardware_dma hardware_irq hardware_clocks tinyusb_pico_pio_usb)
+  pico_generate_pio_header(rim ${CMAKE_CURRENT_LIST_DIR}/src/rp2350/i2s.pio) # audio.c: sound out of the 3.5 mm jack
+  target_link_libraries(rim PRIVATE rimcore pico_stdlib pico_multicore hardware_dma hardware_irq hardware_clocks hardware_pio hardware_i2c
+    tinyusb_pico_pio_usb)
   pico_enable_stdio_usb(rim 1)  # the REPL talks over USB serial
   pico_enable_stdio_uart(rim 0)
   pico_add_extra_outputs(rim)   # rim.uf2, to drop on the board in BOOT mode

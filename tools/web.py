@@ -28,8 +28,8 @@ with tempfile.TemporaryDirectory() as tmp:
   procs = {l.split(' ', 1)[1] for l in r.stdout.splitlines() if l.startswith('host ')}
   full = bool(procs & COMPILER_PROCS)
   wasm = os.path.join(tmp, 'rim.wasm')
-  sources = [os.path.join(root, 'src', 'web', 'main.c')] + [os.path.join(root, 'src', 'core', f) for f in ('rim.c', 'console.c', 'font.c')] + [os.path.join(rio, 'src', 'rio.c')]
-  subprocess.run(['zig', 'cc', '-target', 'wasm32-wasi', '-mexec-model=reactor', '-Oz', '-DRIO_SMALL'] + ([] if full else ['-DRIO_NO_COMPILER']) +
+  sources = [os.path.join(root, 'src', 'web', 'main.c')] + [os.path.join(root, 'src', 'core', f) for f in ('rim.c', 'console.c', 'font.c', 'audio.c')] + [os.path.join(rio, 'src', 'rio.c')]
+  subprocess.run(['zig', 'cc', '-target', 'wasm32-wasi', '-mexec-model=reactor', '-Oz', '-DRIO_SMALL', '-DRIO_MAX_FFI=64'] + ([] if full else ['-DRIO_NO_COMPILER']) +
                  ['-I' + os.path.join(rio, 'src'), '-I' + os.path.join(root, 'src', 'core'), '-Wl,--strip-all', '-o', wasm] + sources, check=True)
   code = base64.b64encode(open(wasm, 'rb').read()).decode()
   cartdata = base64.b64encode(open(cart, 'rb').read() if full else open(img, 'rb').read()).decode()
@@ -66,6 +66,40 @@ canvas { position: absolute; inset: 0; margin: auto; image-rendering: pixelated;
   new Uint8Array(ex.memory.buffer, ex.source(), cart.length).set(cart);
   const draw = () => { image.data.set(new Uint8Array(ex.memory.buffer, ex.pixels(), 320 * 240 * 4)); ctx.putImageData(image, 0, 0); };
   if (ex.start(cart.length)) { draw(); fail(ex.error()); return; }
+  // sound: an AudioWorklet plays what the wasm mixes, kept about 60 ms ahead of the audio clock.
+  // Browsers start sound only after a key or a click; until then a frame's sound is mixed and dropped
+  const worklet = `class Rim extends AudioWorkletProcessor {
+    constructor() { super(); this.q = []; this.at = 0; this.port.onmessage = e => this.q.push(e.data); }
+    process(inputs, outputs) {
+      const l = outputs[0][0], r = outputs[0][1]; let i = 0;
+      while (i < l.length) {
+        const b = this.q[0];
+        if (!b) { l.fill(0, i); r.fill(0, i); break; }
+        for (; i < l.length && this.at < b.length; i++, this.at += 2) { l[i] = b[this.at]; r[i] = b[this.at + 1]; }
+        if (this.at >= b.length) { this.q.shift(); this.at = 0; }
+      }
+      return true;
+    }
+  }
+  registerProcessor("rim", Rim);`;
+  let audio = null, node = null, sent = 0;
+  const mixed = n => { const s = new Int16Array(ex.memory.buffer, ex.mix(n), n * 2), f = new Float32Array(n * 2); for (let i = 0; i < f.length; i++) f[i] = s[i] / 32768; return f; };
+  const startAudio = async () => {
+    if (audio) return;
+    audio = new AudioContext({ sampleRate: 48000 });
+    await audio.audioWorklet.addModule(URL.createObjectURL(new Blob([worklet], { type: "text/javascript" })));
+    node = new AudioWorkletNode(audio, "rim", { outputChannelCount: [2] });
+    node.connect(audio.destination);
+    sent = Math.floor(audio.currentTime * 48000);
+  };
+  const feed = () => {
+    if (!node) { mixed(800); return; }
+    for (const want = Math.floor((audio.currentTime + 0.06) * 48000); sent < want;) {
+      const n = Math.min(2048, want - sent);
+      node.port.postMessage(mixed(n)); sent += n;
+    }
+  };
+  addEventListener("keydown", startAudio); addEventListener("pointerdown", startAudio);
   // btn: arrows, then O (Z or C) and X (X or V)
   const keys = { ArrowLeft: 1, ArrowRight: 2, ArrowUp: 4, ArrowDown: 8, KeyZ: 16, KeyC: 16, KeyX: 32, KeyV: 32 };
   let buttons = 0, next = performance.now(), game = true;
@@ -76,9 +110,11 @@ canvas { position: absolute; inset: 0; margin: auto; image-rendering: pixelated;
     while (game && now >= next) { // 60 frames a second, whatever the display's rate
       const r = ex.frame(buttons);
       if (r) { game = false; if (r < 0) fail(ex.error()); }
+      if (!node) mixed(800); // (no sound yet: keep time anyway)
       next += 1000 / 60;
       if (now - next > 100) next = now;
     }
+    if (node) feed();
     draw();
     if (game) requestAnimationFrame(tick);
   };

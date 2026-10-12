@@ -4,6 +4,7 @@
                                draw* 60 times a second if it's a game (arrows, Z/X: btn; Esc quits)
      -frames n                 instead of a window, run n frames (Z held for the first few)
      -o screen.ppm             instead of a window, afterwards write the screen as an image
+     -wav sound.wav            with -frames: the sound those frames made, as a WAV file
      -i cart.img               compile to an image (see rio_image_load) instead, and list the host
                                procs its code calls (tools/web.py uses both)
    The app space is 256 KB, as on the Fruit Jam and the web, so a cart that fits one fits all three.
@@ -20,6 +21,7 @@
 #endif
 
 static uint8_t rio_mem[256 << 10], repl_scratch[1 << 18], image[512 << 10];
+static int16_t wav[RIM_RATE * 2 * 60]; /* -wav: up to a minute */
 static char src[1 << 20];
 static Rio vm;
 static RimRepl repl;
@@ -55,13 +57,43 @@ static int save_image(const char *cart, const char *path, size_t n) {
   return 0;
 }
 
+/* the sound -frames made, as a 16-bit stereo WAV file */
+static int save_wav(const char *path, uint32_t frames) {
+  FILE *f = fopen(path, "wb"); uint32_t bytes = frames * 4, v;
+  unsigned char h[44] = {'R', 'I', 'F', 'F', 0, 0, 0, 0, 'W', 'A', 'V', 'E', 'f', 'm', 't', ' ', 16, 0, 0, 0, 1, 0, 2, 0,
+                         0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 16, 0, 'd', 'a', 't', 'a'};
+  if (!f) return -1;
+  v = 36 + bytes; memcpy(h + 4, &v, 4); v = RIM_RATE; memcpy(h + 24, &v, 4); v = RIM_RATE * 4; memcpy(h + 28, &v, 4);
+  fwrite(h, 1, 40, f); fwrite(&bytes, 4, 1, f); fwrite(wav, 4, frames, f);
+  return fclose(f);
+}
+
 #if RIM_SDL
+static SDL_AudioStream *audio;
+static void audio_lock(int on) { if (on) SDL_LockAudioStream(audio); else SDL_UnlockAudioStream(audio); }
+/* SDL wants more sound: mix it (SDL holds the stream's lock meanwhile, as host procs do) */
+static void audio_more(void *ud, SDL_AudioStream *s, int more, int total) {
+  static int16_t buf[1024 * 2];
+  (void)ud; (void)total;
+  while (more > 0) {
+    int frames = more / 4 > 1024 ? 1024 : (more + 3) / 4;
+    rim_audio_mix(buf, frames);
+    SDL_PutAudioStreamData(s, buf, frames * 4);
+    more -= frames * 4;
+  }
+}
 static float sdl_now(void) { return (float)((double)SDL_GetTicksNS() / 1e9); }
 
 /* the screen in a window, scaled up by whole steps; a game gets a frame every 1/60 s */
 static int window(const char *title) {
   SDL_Window *w; SDL_Renderer *r; SDL_Texture *tex; uint64_t next; int game = 1, running = 1;
-  if (!SDL_Init(SDL_INIT_VIDEO)) { fprintf(stderr, "rim: %s\n", SDL_GetError()); return 1; }
+  SDL_AudioSpec spec;
+  if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) { fprintf(stderr, "rim: %s\n", SDL_GetError()); return 1; }
+  spec.format = SDL_AUDIO_S16; spec.channels = 2; spec.freq = RIM_RATE;
+  if ((audio = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, audio_more, 0))) { /* (no sound device: play on silently) */
+    rim_audio_lock = audio_lock;
+    SDL_ResumeAudioStreamDevice(audio);
+  }
   if (!SDL_CreateWindowAndRenderer(title, RIM_W * 2, RIM_H * 2, SDL_WINDOW_RESIZABLE, &w, &r)) { fprintf(stderr, "rim: %s\n", SDL_GetError()); return 1; }
   SDL_SetRenderLogicalPresentation(r, RIM_W, RIM_H, SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
   SDL_SetRenderVSync(r, 1);
@@ -98,11 +130,12 @@ static int window(const char *title) {
 #endif
 
 int main(int argc, char **argv) {
-  const char *cart = 0, *out = 0, *img = 0; int i, fn, frames = 0;
+  const char *cart = 0, *out = 0, *img = 0, *wavout = 0; int i, fn, frames = 0;
   for (i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "-o") && i + 1 < argc) out = argv[++i];
     else if (!strcmp(argv[i], "-frames") && i + 1 < argc) frames = atoi(argv[++i]);
     else if (!strcmp(argv[i], "-i") && i + 1 < argc) img = argv[++i];
+    else if (!strcmp(argv[i], "-wav") && i + 1 < argc) wavout = argv[++i];
     else if (argv[i][0] == '-' || cart) { fprintf(stderr, "usage: rim [cart.rio] [-frames n] [-o screen.ppm]\n"); return 2; }
     else cart = argv[i];
   }
@@ -122,7 +155,9 @@ int main(int argc, char **argv) {
     for (i = 0; i < frames; i++) { /* a game, without a window: Z held for the first frames (to start it) */
       rim_buttons = i < 3 ? RIM_O : 0;
       if (rim_frame(&vm) < 0) { fflush(stdout); fprintf(stderr, "%s:%s\n", cart, rio_error(&vm)); return 1; }
+      if (wavout && i < 60 * 60) rim_audio_mix(wav + i * (RIM_RATE / 60) * 2, RIM_RATE / 60); /* (a frame's worth of sound) */
     }
+    if (wavout && save_wav(wavout, (uint32_t)(frames < 3600 ? frames : 3600) * (RIM_RATE / 60))) { fprintf(stderr, "rim: can't write %s\n", wavout); return 1; }
   } else {
     int c;
     if (rim_repl_begin(&repl, &vm, repl_scratch, sizeof repl_scratch)) { fprintf(stderr, "rim: %s\n", rio_error(&vm)); return 1; }

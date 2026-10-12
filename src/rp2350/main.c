@@ -15,6 +15,7 @@
 #include "rim.h"
 #include "video.h"
 #include "keyboard.h"
+#include "rim_audio.h"
 #include "tusb.h" /* (HID key codes) */
 
 #define RIO_MEM (256 << 10)      /* the app space */
@@ -54,7 +55,8 @@ int main(void) {
   ok = !rim_start(&vm, rio_mem, RIO_MEM - REPL_SCRATCH, put) && rio_jit(&vm, jit_code, sizeof jit_code) >= 0;
   rim_console_clear(1);
   rim_console_put("Rim\r\n\r\n", 7);
-  rim_video_start();
+  rim_audio_setup();
+  rim_video_start(); /* (core 1: video, then sound) */
   rim_keyboard_start();
   if (!ok || rim_repl_begin(&repl, &vm, rio_mem + RIO_MEM - REPL_SCRATCH, REPL_SCRATCH)) {
     for (;;) { printf("rim: can't start: %s\r\n", rio_error(&vm)); sleep_ms(1000); }

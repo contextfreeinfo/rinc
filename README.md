@@ -14,7 +14,7 @@ src/core/          shared by every platform: the screen, palette, font and conso
 src/rp2350/        the Fruit Jam: HDMI out (video.c), USB keyboards (keyboard.c), the main loop
 src/desktop/       a window (SDL3, built in) or headless
 src/web/           wasm for a web page (tools/web.py builds the page)
-tools/             font.py (the font table), web.py (a cart as one HTML page)
+tools/             font.py (the font table), web.py (a cart as one HTML page), send.py (a cart to the board)
 carts/             rio programs
 ```
 
@@ -47,7 +47,8 @@ python -m serial.tools.miniterm COM3 115200 --eol CR   # pip install pyserial; C
 ```
 
 Type or paste a cart, then `run` to start its game loop; Esc stops it (from the keyboard, or Esc or
-Ctrl-C over serial).
+Ctrl-C over serial). From a PC, `uv run tools/send.py carts/bounce.rio` sends a cart and starts it, in
+a couple of seconds (`carts/bounce.rio` is the short one to try things with).
 
 **Building.** Install the Pico SDK (2.x) and an ARM GCC; the Raspberry Pi Pico extension for VS Code
 sets up both. Then:

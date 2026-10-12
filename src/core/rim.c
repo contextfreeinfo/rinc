@@ -54,9 +54,10 @@ int rim_start(Rio *vm, void *mem, uint32_t memsize, void (*put)(const char *s, i
   rim_put = put;
   init_palette();
   if (rio_init(vm, mem, memsize, 0, 0)) return -1; /* no code buffer: the code goes in mem too */
+  rim_audio_reset();
   rio_set_log(vm, log_line, 0);
   if (rio_ffi(vm, "cls", "i", h_cls) || rio_ffi(vm, "pset", "iii", h_pset) || rio_ffi(vm, "pget", "ii>i", h_pget) ||
-      rio_ffi(vm, "rect", "iiiii", h_rect) || rio_ffi(vm, "print", "siii", h_print) || rio_ffi(vm, "btn", "i>i", h_btn) || rio_ffi(vm, "time", ">f", h_time)) return -1;
+      rio_ffi(vm, "rect", "iiiii", h_rect) || rio_ffi(vm, "print", "siii", h_print) || rio_ffi(vm, "btn", "i>i", h_btn) || rim_audio_procs(vm) || rio_ffi(vm, "time", ">f", h_time)) return -1;
   return 0;
 }
 
@@ -83,6 +84,7 @@ int rim_repl_begin(RimRepl *r, Rio *vm, void *scratch, uint32_t size) {
 
 void rim_repl_stop(RimRepl *r, const char *why) {
   r->run = 0;
+  rim_audio_reset(); /* a game's sounds stop with it */
   if (why) { r->put(why, (int)strlen(why)); r->put("\r\n", 2); }
   prompt(r);
 }

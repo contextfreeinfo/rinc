@@ -1,0 +1,67 @@
+# Bounce: the arrow keys tilt gravity, Z adds a ball, X shakes them all. Walls go blip
+Ball :: struct
+  x, y, dx, dy: Float
+  c: Int
+end
+
+balls: [..64]Ball
+blip: Blob[1200] # a falling square wave, 8-bit, played at 22050 a second
+for i in 0..<1200
+  v := (1200 - i) / 10
+  if i / 12 % 2 == 1
+    v = -v
+  end
+  blip[i] = v & 255
+end
+gx := 0.0
+gy := 0.15
+held := false
+tick := 0
+
+add :: proc()
+  n := balls.len()
+  ok := balls.push(Ball{x = 160.0, y = 40.0, dx = (n % 7).toFloat() - 3.0, dy = 0.0, c = 8 + n % 8})
+end
+add()
+
+update* :: proc()
+  tick += 1
+  gx = (btn(1) - btn(0)).toFloat() * 0.15
+  gy = (btn(3) - btn(2)).toFloat() * 0.15 + 0.15
+  if btn(4) == 1 and not held
+    add()
+  end
+  held = btn(4) == 1
+  for b, k in balls
+    hit := false
+    if btn(5) == 1
+      b.dy -= 1.0
+    end
+    b.dx += gx
+    b.dy += gy
+    b.x += b.dx
+    b.y += b.dy
+    if b.x < 4.0 or b.x > 316.0
+      b.dx = -b.dx * 0.9
+      b.x = max(4.0, min(b.x, 316.0))
+      hit = abs(b.dx) > 0.5
+    end
+    if b.y < 4.0 or b.y > 236.0
+      b.dy = -b.dy * 0.9
+      b.y = max(4.0, min(b.y, 236.0))
+      hit = hit or abs(b.dy) > 0.5
+    end
+    if hit # its own voice, pitched by color, panned by where it hit
+      sound(k % 8, blip, 8, 1, 16000.0 + (b.c - 8).toFloat() * 3000.0)
+      soundPan(k % 8, b.x / 160.0 - 1.0)
+    end
+  end
+end
+
+draw* :: proc()
+  cls(0)
+  for b in balls
+    rect(b.x.toInt() - 4, b.y.toInt() - 4, 8, 8, b.c)
+  end
+  print("arrows tilt  Z adds  X shakes", 4, 4, 6)
+end

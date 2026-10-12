@@ -18,6 +18,7 @@
 #include "hardware/structs/hstx_fifo.h"
 #include "rim.h"
 #include "video.h"
+#include "rim_audio.h"
 
 /* 640x480 at 60 Hz (CEA VIC 1): 25.2 MHz pixels, from a 252 MHz clk_sys / 2 for the HSTX, which
    sends 2 bits a cycle: 252 Mbps, 10 bits a pixel */
@@ -106,6 +107,7 @@ static void core1(void) {
   irq_set_enabled(DMA_IRQ_1, true);
   bus_ctrl_hw->priority = BUSCTRL_BUS_PRIORITY_DMA_W_BITS | BUSCTRL_BUS_PRIORITY_DMA_R_BITS;
   dma_channel_start(ping);
+  rim_audio_start();
   for (;;) __wfi();
 }
 

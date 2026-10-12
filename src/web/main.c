@@ -12,6 +12,7 @@ static _Alignas(16) uint8_t rio_mem[256 << 10]; /* the same app space as on the 
 static char src[128 << 10]; /* the cart: its source, or its image */
 static Rio vm;
 static uint32_t rgba[RIM_W * RIM_H];
+static int16_t sound[2048 * 2];
 
 static void put(const char *s, int n) { js_put(s, n); }
 
@@ -31,6 +32,8 @@ EXPORT(start) int start(int len) {
 /* a frame with these buttons held: 0, 1 (not a game), -1 (error) */
 EXPORT(frame) int frame(int buttons) { rim_buttons = (uint8_t)buttons; return rim_frame(&vm); }
 EXPORT(error) const char *error(void) { return rio_error(&vm); }
+/* the next frames of sound (at most 2048), as 16-bit stereo */
+EXPORT(mix) int16_t *mix(int frames) { rim_audio_mix(sound, frames < 2048 ? frames : 2048); return sound; }
 /* the screen as RGBA bytes for a canvas */
 EXPORT(pixels) uint32_t *pixels(void) {
   int i;

@@ -25,6 +25,18 @@ int rim_start(Rio *vm, void *mem, uint32_t memsize, void (*put)(const char *s, i
    neither (it isn't a game), -1: a runtime error (rio_error says) */
 int rim_frame(Rio *vm);
 
+/* sound (audio.c): RIM_VOICES voices mixed to RIM_RATE frames a second of 16-bit stereo. Host procs:
+   sound(voice, data, bits, channels, rate), soundRate(voice, rate), soundVolume(voice, 0..1),
+   soundPan(voice, -1..1), soundLoop(voice, start, end), soundStop(voice), soundPlaying(voice) -> Int.
+   A platform pulls samples with rim_audio_mix, and sets rim_audio_lock when that runs on another
+   thread or in an interrupt (called with 1 before a host proc changes a voice, 0 after) */
+#define RIM_RATE 48000
+#define RIM_VOICES 8
+void rim_audio_mix(int16_t *stereo, int frames);
+void rim_audio_reset(void); /* every voice stops */
+extern void (*rim_audio_lock)(int on);
+int rim_audio_procs(Rio *vm);
+
 /* text: the 5x8 font (ASCII 32-126, bit 0 leftmost) in 6x9 cells, and a console of 53x26 of them
    that scrolls the screen (console.c) */
 extern const uint8_t rim_font[95][8];
