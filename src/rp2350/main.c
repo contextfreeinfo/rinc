@@ -15,6 +15,7 @@
 #include "rim.h"
 #include "video.h"
 #include "keyboard.h"
+#include "gamepad.h"
 #include "rim_audio.h"
 #include "tusb.h" /* (HID key codes) */
 
@@ -38,9 +39,10 @@ static void game_frame(void) {
   if (DOWN(HID_KEY_ESCAPE) || (res = getchar_timeout_us(0)) == 27 || res == 3) { /* Esc, on the keyboard or over serial (or Ctrl-C) */
     rim_console_put("\r\n", 2); rim_repl_stop(&repl, "stopped"); return;
   }
-  rim_buttons = (uint8_t)(DOWN(HID_KEY_ARROW_LEFT) * RIM_LEFT | DOWN(HID_KEY_ARROW_RIGHT) * RIM_RIGHT |
-    DOWN(HID_KEY_ARROW_UP) * RIM_UP | DOWN(HID_KEY_ARROW_DOWN) * RIM_DOWN | (DOWN(HID_KEY_Z) | DOWN(HID_KEY_C)) * RIM_O |
-    (DOWN(HID_KEY_X) | DOWN(HID_KEY_V)) * RIM_X);
+  rim_pad_read();
+  rim_buttons = rim_pad_buttons | (uint16_t)(DOWN(HID_KEY_ARROW_LEFT) * RIM_LEFT | DOWN(HID_KEY_ARROW_RIGHT) * RIM_RIGHT |
+    DOWN(HID_KEY_ARROW_UP) * RIM_UP | DOWN(HID_KEY_ARROW_DOWN) * RIM_DOWN | DOWN(HID_KEY_V) * RIM_A |
+    DOWN(HID_KEY_C) * RIM_B | DOWN(HID_KEY_X) * RIM_X | DOWN(HID_KEY_Z) * RIM_Y);
   res = rim_frame(&vm);
   if (res) { repl.run = 0; rim_repl_stop(&repl, res > 0 ? "nothing to run: define update* or draw*" : rio_error(&vm)); }
 }

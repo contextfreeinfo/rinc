@@ -30,11 +30,20 @@ Carts draw into one 320x240 screen of 8-bit palette indexes, through host procs:
 | `pset(x, y, c)`, `pget(x, y) -> c` | one pixel |
 | `rect(x, y, w, h, c)` | a filled rectangle |
 | `print(s, x, y, c)` | text, in the 5x8 font, 6 pixels a character |
-| `btn(i) -> Int` | 1 while button i is held: 0 left, 1 right, 2 up, 3 down (arrows), 4 O (Z or C), 5 X (X or V) |
+| `btn(i) -> Int` | 1 while button i is held: 0 left, 1 right, 2 up, 3 down (arrows), then the face buttons, most important first and named as on an Xbox controller: 4 A (V key), 5 B (C), 6 X (X), 7 Y (Z); then a controller's 8 LB, 9 RB, 10 and 11 the sticks pressed in, 12 Start, 13 Back |
+| `stick(i) -> Float` | a controller's sticks: 0 left x, 1 left y, 2 right x, 3 right y; -1 to 1, + right and down, 0 near the middle |
+| `trigger(i) -> Float` | its triggers: 0 left, 1 right; 0 to 1 |
 | `time() -> Float` | seconds since start |
 | `fromHex(out, text) -> Int` | bytes from hex digits into a Blob (anything else in the text is skipped), until it's full: how many. For data typed into a cart |
 
 The palette is the PICO-8 16 colors, then a 6x6x6 color cube, then 24 grays.
+
+**Controllers.** An Xbox-style controller is player 1 alongside the keyboard: its d-pad and face
+buttons are the same `btn` numbers as the keys (and its left stick pushed well over counts as the
+arrows), and `stick` and `trigger` read it, or give 0 without one. On the desktop that's any controller
+SDL knows (Xbox, PlayStation, Switch and more); on the web, any the browser maps to the standard layout;
+on the Fruit Jam, wired Xbox 360 and Xbox One/Series controllers, recognized by the USB interfaces they
+offer (`src/rp2350/gamepad.c`).
 
 **Sound.** 8 voices, numbered 0 to 7, mixed to 48 kHz 16-bit stereo, out of HDMI and the 3.5 mm jack
 on the board. A voice plays sound straight from the cart's memory, at any rate, with linear
@@ -67,6 +76,8 @@ plugged into the board, and at the same time on the USB serial port:
 ```sh
 python -m serial.tools.miniterm COM3 115200 --eol CR   # pip install pyserial; Ctrl+] quits
 ```
+
+A keyboard's volume knob or keys set the system volume (both outputs, in 2.5 dB steps; mute too).
 
 Type or paste a cart, then `run` to start its game loop; Esc stops it (from the keyboard, or Esc or
 Ctrl-C over serial). From a PC, `uv run tools/send.py carts/bounce.rio` sends a cart and starts it, in

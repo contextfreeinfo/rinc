@@ -1,4 +1,4 @@
-# Bounce: the arrow keys tilt gravity, Z adds a ball, X shakes them all. Walls go blip
+# Bounce: the arrow keys tilt gravity, V adds a ball, C shakes them all. Walls go blip
 Ball :: struct
   x, y, dx, dy: Float
   c: Int
@@ -63,5 +63,5 @@ draw* :: proc()
   for b in balls
     rect(b.x.toInt() - 4, b.y.toInt() - 4, 8, 8, b.c)
   end
-  print("arrows tilt  Z adds  X shakes", 4, 4, 6)
+  print("arrows tilt  V adds  C shakes", 4, 4, 6)
 end

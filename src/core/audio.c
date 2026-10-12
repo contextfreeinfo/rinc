@@ -10,6 +10,7 @@
    where decoding can start over, so going back (a loop) starts at a block, and soundLoop keeps the
    decoder's state at the loop's start so wrapping around costs nothing. A quarter the size of 16-bit,
    and close to it in sound. */
+#include <math.h>
 #include <string.h>
 #include "rim.h"
 
@@ -29,6 +30,8 @@ typedef struct {
 } Voice;
 
 static Voice voices[RIM_VOICES];
+static volatile int32_t master = 32768; /* the system's volume, over all of it (1.15) */
+static int level = RIM_VOLUME_STEPS, muted;
 void (*rim_audio_lock)(int on);
 static void lock(int on) { if (rim_audio_lock) rim_audio_lock(on); }
 
@@ -207,10 +210,20 @@ void RIM_HOT rim_audio_mix(int16_t *out, int frames) {
       else if (v->bits == 16 && !((uintptr_t)v->data & 1)) mix_pcm16(v, n);
       else mix_voice(v, n);
     }
+    if (master != 32768) { int32_t m = master; for (f = 0; f < n * 2; f++) sums[f] = (int32_t)((int64_t)sums[f] * m >> 15); }
     for (f = 0; f < n * 2; f++) out[f] = (int16_t)(sums[f] < -32768 ? -32768 : sums[f] > 32767 ? 32767 : sums[f]);
     out += n * 2; frames -= n;
   }
 }
+
+/* the system's volume (a keyboard's volume knob, say; not the cart's to change): a step up or down,
+   2.5 dB each, from full down to -40 dB; 0 turns mute on or off */
+void rim_audio_volume(int step) {
+  if (!step) muted = !muted;
+  else level = level + step < 0 ? 0 : level + step > RIM_VOLUME_STEPS ? RIM_VOLUME_STEPS : level + step;
+  master = muted ? 0 : (int32_t)(32768.0f * powf(10.0f, -(float)(RIM_VOLUME_STEPS - level) * 2.5f / 20.0f) + 0.5f);
+}
+int rim_audio_level(void) { return muted ? -1 : level; }
 
 void rim_audio_reset(void) { lock(1); memset(voices, 0, sizeof voices); lock(0); }
 

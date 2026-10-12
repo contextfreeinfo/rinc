@@ -56,7 +56,7 @@ if(RIM_PLATFORM STREQUAL rp2350)
   # sources compiled here (tinyusb_host would turn the native port into a host too: it stays a device,
   # for the serial port); tusb_config.h in src/rp2350 configures both
   set(TUSB ${PICO_SDK_PATH}/lib/tinyusb/src)
-  add_executable(rim src/rp2350/main.c src/rp2350/video.c src/rp2350/keyboard.c src/rp2350/audio.c src/rp2350/hdmi_packet.c
+  add_executable(rim src/rp2350/main.c src/rp2350/video.c src/rp2350/keyboard.c src/rp2350/audio.c src/rp2350/hdmi_packet.c src/rp2350/gamepad.c
     ${TUSB}/host/usbh.c ${TUSB}/host/hub.c ${TUSB}/class/hid/hid_host.c ${TUSB}/portable/raspberrypi/pio_usb/hcd_pio_usb.c)
   target_include_directories(rim BEFORE PRIVATE src/rp2350)
   target_compile_definitions(rim PRIVATE PICO_STACK_SIZE=0x1000 PICO_CORE1_STACK_SIZE=0x800)
@@ -82,7 +82,7 @@ else()
     set(SDL_SHARED OFF CACHE BOOL "" FORCE)
     set(SDL_STATIC ON CACHE BOOL "" FORCE)
     set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
-    foreach(off CAMERA HAPTIC SENSOR POWER DIALOG TRAY GPU HIDAPI)
+    foreach(off CAMERA HAPTIC SENSOR POWER DIALOG TRAY GPU)
       set(SDL_${off} OFF CACHE BOOL "" FORCE)
     endforeach()
     FetchContent_Declare(SDL3

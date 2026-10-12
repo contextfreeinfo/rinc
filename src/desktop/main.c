@@ -1,7 +1,7 @@
 /* Rim on the desktop:
      rim                       a rio REPL in the terminal
      rim cart.rio              run a cart in a window: its top-level code and main, then update* and
-                               draw* 60 times a second if it's a game (arrows, Z/X: btn; Esc quits)
+                               draw* 60 times a second if it's a game (arrows, V C X Z: btn; Esc quits)
      -frames n                 instead of a window, run n frames (Z held for the first few)
      -o screen.ppm             instead of a window, afterwards write the screen as an image
      -wav sound.wav            with -frames: the sound those frames made, as a WAV file
@@ -193,11 +193,30 @@ static void audio_more(void *ud, SDL_AudioStream *s, int more, int total) {
 }
 static float sdl_now(void) { return (float)((double)SDL_GetTicksNS() / 1e9); }
 
+/* a controller (SDL's gamepads: Xbox and the rest), as player 1: its buttons as Rim's, its sticks and
+   triggers into rim_axes */
+static SDL_Gamepad *pad;
+static uint16_t pad_read(void) {
+  static const struct { int sdl; uint16_t rim; } map[] = {
+    {SDL_GAMEPAD_BUTTON_DPAD_LEFT, RIM_LEFT}, {SDL_GAMEPAD_BUTTON_DPAD_RIGHT, RIM_RIGHT}, {SDL_GAMEPAD_BUTTON_DPAD_UP, RIM_UP},
+    {SDL_GAMEPAD_BUTTON_DPAD_DOWN, RIM_DOWN}, {SDL_GAMEPAD_BUTTON_SOUTH, RIM_A}, {SDL_GAMEPAD_BUTTON_EAST, RIM_B},
+    {SDL_GAMEPAD_BUTTON_WEST, RIM_X}, {SDL_GAMEPAD_BUTTON_NORTH, RIM_Y}, {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, RIM_LB},
+    {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, RIM_RB}, {SDL_GAMEPAD_BUTTON_LEFT_STICK, RIM_LS}, {SDL_GAMEPAD_BUTTON_RIGHT_STICK, RIM_RS},
+    {SDL_GAMEPAD_BUTTON_START, RIM_START}, {SDL_GAMEPAD_BUTTON_BACK, RIM_BACK}};
+  static const int axes[6] = {SDL_GAMEPAD_AXIS_LEFTX, SDL_GAMEPAD_AXIS_LEFTY, SDL_GAMEPAD_AXIS_RIGHTX, SDL_GAMEPAD_AXIS_RIGHTY,
+    SDL_GAMEPAD_AXIS_LEFT_TRIGGER, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER};
+  uint16_t b = 0; size_t i;
+  if (!pad) { memset(rim_axes, 0, sizeof rim_axes); return 0; }
+  for (i = 0; i < sizeof map / sizeof map[0]; i++) if (SDL_GetGamepadButton(pad, (SDL_GamepadButton)map[i].sdl)) b |= map[i].rim;
+  for (i = 0; i < 6; i++) { int v = SDL_GetGamepadAxis(pad, (SDL_GamepadAxis)axes[i]); rim_axes[i] = (int16_t)(v < -32767 ? -32767 : v); }
+  return b;
+}
+
 /* the screen in a window, scaled up by whole steps; a game gets a frame every 1/60 s */
 static int window(const char *title) {
   SDL_Window *w; SDL_Renderer *r; SDL_Texture *tex; uint64_t next; int game = 1, running = 1;
   SDL_AudioSpec spec;
-  if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) { fprintf(stderr, "rim: %s\n", SDL_GetError()); return 1; }
+  if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) { fprintf(stderr, "rim: %s\n", SDL_GetError()); return 1; }
   spec.format = SDL_AUDIO_S16; spec.channels = 2; spec.freq = RIM_RATE;
   if ((audio = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, audio_more, 0))) { /* (no sound device: play on silently) */
     rim_audio_lock = audio_lock;
@@ -212,11 +231,14 @@ static int window(const char *title) {
   next = SDL_GetTicksNS();
   while (running) {
     SDL_Event e; const bool *k; uint16_t *px; int pitch, x, y;
-    while (SDL_PollEvent(&e))
+    while (SDL_PollEvent(&e)) {
       if (e.type == SDL_EVENT_QUIT || (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE)) running = 0;
+      if (e.type == SDL_EVENT_GAMEPAD_ADDED && !pad) pad = SDL_OpenGamepad(e.gdevice.which);
+      if (e.type == SDL_EVENT_GAMEPAD_REMOVED && pad && SDL_GetGamepadID(pad) == e.gdevice.which) { SDL_CloseGamepad(pad); pad = 0; }
+    }
     k = SDL_GetKeyboardState(0);
-    rim_buttons = (uint8_t)(k[SDL_SCANCODE_LEFT] * RIM_LEFT | k[SDL_SCANCODE_RIGHT] * RIM_RIGHT | k[SDL_SCANCODE_UP] * RIM_UP |
-      k[SDL_SCANCODE_DOWN] * RIM_DOWN | (k[SDL_SCANCODE_Z] | k[SDL_SCANCODE_C]) * RIM_O | (k[SDL_SCANCODE_X] | k[SDL_SCANCODE_V]) * RIM_X);
+    rim_buttons = pad_read() | (uint16_t)(k[SDL_SCANCODE_LEFT] * RIM_LEFT | k[SDL_SCANCODE_RIGHT] * RIM_RIGHT | k[SDL_SCANCODE_UP] * RIM_UP |
+      k[SDL_SCANCODE_DOWN] * RIM_DOWN | k[SDL_SCANCODE_V] * RIM_A | k[SDL_SCANCODE_C] * RIM_B | k[SDL_SCANCODE_X] * RIM_X | k[SDL_SCANCODE_Z] * RIM_Y);
     while (game && SDL_GetTicksNS() >= next) { /* 60 frames a second, whatever the display's rate */
       int res = rim_frame(&vm);
       if (res) { game = 0; if (res < 0) { fprintf(stderr, "%s\n", rio_error(&vm)); running = 0; } }
@@ -282,7 +304,7 @@ int main(int argc, char **argv) {
     if (!out && !frames) return window(cart);
 #endif
     for (i = 0; i < frames; i++) { /* a game, without a window: Z held for the first frames (to start it) */
-      rim_buttons = i < 3 ? RIM_O : 0;
+      rim_buttons = i < 3 ? RIM_A : 0;
       if (rim_frame(&vm) < 0) { fflush(stdout); fprintf(stderr, "%s:%s\n", cart, rio_error(&vm)); return 1; }
       if (wavout && i < 60 * 60) rim_audio_mix(wav + i * (RIM_RATE / 60) * 2, RIM_RATE / 60); /* (a frame's worth of sound) */
     }

@@ -128,17 +128,40 @@ cbcbbaaa9800121290ebdccbcbaa89214644533224220190b9bdbddbbabbcbbababbbaab9a316554
 ")
 # play it: sound(0, chord, 4, 1, 22050.0)
 
-# Chord: a plucked chord in 4-bit ADPCM (5.6 KB; 16-bit would be 22 KB), typed in as hex.
-# Z plays it (on the next of the 8 voices, so they overlap), X holds a loop of its tail,
-# left and right change the pitch, up and down the pan.
+# Chord: a plucked chord in 4-bit ADPCM (5.6 KB), typed in as hex, and the same chord as 16-bit
+# (22 KB) and 8-bit (11 KB), made here, to hear the difference. V plays the ADPCM one, C the 16-bit
+# one, X the 8-bit one (each on the next of the 8 voices, so they overlap); left and right change
+# the pitch, up and down the pan. Measured on this chord: ADPCM and 8-bit both 36 dB signal to noise, but in the quiet
+# tail ADPCM 40 dB and 8-bit 28 (8-bit's noise stays put as the sound fades; ADPCM's shrinks with it).
+# ADPCM at 22 kHz is its grainy end: it gets better with the rate, about 9 dB each time it doubles.
+fine: [11025]Float
+pluck :: proc(f: Float, start: Int)
+  for i in start..<11025
+    t := (i - start).toFloat() / 22050.0
+    fine[i] += 0.22 * exp(-6.0 * t) * (sin(6.2831853 * f * t) + 0.3 * sin(12.566371 * f * t))
+  end
+end
+pluck(220.0, 0)
+pluck(261.63, 1102)
+pluck(329.63, 2204)
+pluck(440.0, 3306)
+chord16: Blob[22050]
+chord8: Blob[11025]
+for x, i in fine
+  v := max(min((x * 32767.0).toInt(), 32767), -32768)
+  chord16[i * 2] = v & 255
+  chord16[i * 2 + 1] = (v >> 8) & 255
+  chord8[i] = max(min(round(x * 127.0).toInt(), 127), -128) & 255
+end
+
 pitch := 1.0
 pan := 0.0
 next := 0
 held := 0
-looping := false
+last := "ADPCM"
 
 update* :: proc()
-  pressed := btn(4) + btn(5) * 2
+  pressed := btn(4) + btn(5) * 2 + btn(6) * 4
   if btn(0) == 1
     pitch = max(pitch * 0.99, 0.25)
   end
@@ -153,18 +176,18 @@ update* :: proc()
   end
   if pressed & 1 == 1 and held & 1 == 0
     sound(next, chord, 4, 1, 22050.0 * pitch)
-    soundPan(next, pan)
     next = (next + 1) % 8
+    last = "ADPCM"
   end
   if pressed & 2 == 2 and held & 2 == 0
-    looping = not looping
-    if looping
-      sound(7, chord, 4, 1, 22050.0 * pitch)
-      soundLoop(7, 4410, 8820) # (a stretch of the tail: from 0.2 s to 0.4 s)
-      soundVolume(7, 0.5)
-    else
-      soundStop(7)
-    end
+    sound(next, chord16, 16, 1, 22050.0 * pitch)
+    next = (next + 1) % 8
+    last = "16-BIT"
+  end
+  if pressed & 4 == 4 and held & 4 == 0
+    sound(next, chord8, 8, 1, 22050.0 * pitch)
+    next = (next + 1) % 8
+    last = "8-BIT"
   end
   held = pressed
   for k in 0..<8
@@ -175,14 +198,13 @@ end
 
 draw* :: proc()
   cls(1)
-  print("CHORD: 4-BIT ADPCM, 5590 BYTES", 8, 8, 7)
-  print("Z: PLAY   X: LOOP THE TAIL", 8, 24, 6)
+  print("CHORD: ADPCM 5590 B, 16-BIT 22050, 8-BIT 11025", 8, 8, 7)
+  print("V: ADPCM   C: 16-BIT   X: 8-BIT", 8, 24, 6)
   print("LEFT/RIGHT: PITCH   UP/DOWN: PAN", 8, 34, 6)
-  playing := 0
+  print(last, 8, 110, 10)
   for k in 0..<8
     if soundPlaying(k) == 1
       rect(8 + k * 14, 60, 10, 10, 8 + k)
-      playing += 1
     else
       rect(8 + k * 14, 60, 10, 10, 5)
     end

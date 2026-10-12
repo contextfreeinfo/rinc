@@ -30,8 +30,12 @@ EXPORT(start) int start(int len) {
   return (fn = rio_func(&vm, "main")) >= 0 ? rio_call(&vm, fn) : 0;
 }
 /* a frame with these buttons held: 0, 1 (not a game), -1 (error) */
-EXPORT(frame) int frame(int buttons) { rim_buttons = (uint8_t)buttons; return rim_frame(&vm); }
+EXPORT(frame) int frame(int buttons) { rim_buttons = (uint16_t)buttons; return rim_frame(&vm); }
 EXPORT(error) const char *error(void) { return rio_error(&vm); }
+/* a controller's sticks and triggers, before a frame (as in rim_axes) */
+EXPORT(axes) void axes(int lx, int ly, int rx, int ry, int lt, int rt) {
+  rim_axes[0] = (int16_t)lx; rim_axes[1] = (int16_t)ly; rim_axes[2] = (int16_t)rx; rim_axes[3] = (int16_t)ry; rim_axes[4] = (int16_t)lt; rim_axes[5] = (int16_t)rt;
+}
 /* the next frames of sound (at most 2048), as 16-bit stereo */
 EXPORT(mix) int16_t *mix(int frames) { rim_audio_mix(sound, frames < 2048 ? frames : 2048); return sound; }
 /* the screen as RGBA bytes for a canvas */

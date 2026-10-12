@@ -103,10 +103,10 @@ draw* :: proc()
   ok := text.format("SCORE ", score, "   LIVES ", lives)
   print(text[:].asString(), 4, 4, 7)
   if left == 0
-    print("YOU WIN!  Z to play again", 85, 120, 11)
+    print("YOU WIN!  V to play again", 85, 120, 11)
   else if lives == 0
-    print("GAME OVER  Z to play again", 82, 120, 8)
+    print("GAME OVER  V to play again", 82, 120, 8)
   else if serving
-    print("Z to serve", 130, 150, 6)
+    print("V to serve", 130, 150, 6)
   end
 end

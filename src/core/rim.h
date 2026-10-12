@@ -12,10 +12,16 @@
 extern uint8_t rim_screen[RIM_H][RIM_W]; /* 8 bits per pixel: an index into rim_palette */
 extern uint16_t rim_palette[256];        /* RGB565: the PICO-8 16, a 6x6x6 color cube, 24 grays */
 extern float (*rim_time)(void);          /* seconds since start, from the platform */
-/* buttons held, as on PICO-8: bit 0 left, 1 right, 2 up, 3 down, 4 O (Z key), 5 X (X key). Each
-   platform sets them from its keys before a frame */
-extern uint8_t rim_buttons;
-enum { RIM_LEFT = 1, RIM_RIGHT = 2, RIM_UP = 4, RIM_DOWN = 8, RIM_O = 16, RIM_X = 32 };
+/* buttons held: bit 0 left, 1 right, 2 up, 3 down, then the face buttons, named as on an Xbox
+   controller and in order of importance: 4 A (V key), 5 B (C), 6 X (X), 7 Y (Z), then the
+   controller's others: 8 LB, 9 RB, 10 left stick, 11 right stick (pressed in), 12 Start, 13 Back.
+   Each platform sets them from its keys and controllers before a frame */
+extern uint16_t rim_buttons;
+/* a controller's sticks and triggers, also set by the platform: 0 left stick x, 1 its y, 2 and 3 the
+   right stick's (-32767 to 32767; y is + down, as on the screen), 4 left trigger, 5 right (0 to 32767) */
+extern int16_t rim_axes[6];
+enum { RIM_LEFT = 1, RIM_RIGHT = 2, RIM_UP = 4, RIM_DOWN = 8, RIM_A = 16, RIM_B = 32, RIM_X = 64, RIM_Y = 128,
+       RIM_LB = 256, RIM_RB = 512, RIM_LS = 1024, RIM_RS = 2048, RIM_START = 4096, RIM_BACK = 8192 };
 
 /* set up rio in the given memory (the app space: code and data both live there), with log output
    going to put and the host procs carts call: cls(c), pset(x, y, c), pget(x, y) -> c,
@@ -40,6 +46,9 @@ int rim_frame(Rio *vm);
 #define RIM_ADPCM_BLOCK 256 /* sound(..., 4, ...): ADPCM blocks of this many bytes a channel (505 frames) */
 void rim_audio_mix(int16_t *stereo, int frames);
 void rim_audio_reset(void); /* every voice stops */
+#define RIM_VOLUME_STEPS 16
+void rim_audio_volume(int step); /* the system volume: +1 or -1 steps (2.5 dB), 0 to mute or unmute */
+int rim_audio_level(void);       /* 0 to RIM_VOLUME_STEPS (full), or -1 muted */
 extern void (*rim_audio_lock)(int on);
 int rim_audio_procs(Rio *vm);
 
