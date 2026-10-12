@@ -138,7 +138,7 @@ int rim_frame(Rio *vm) {
 #define PAINT_PLAIN "\033[0m"
 enum { MODE_PLAIN, MODE_STRING, MODE_COMMENT };
 static void puts_(RimRepl *r, const char *s) { r->put(s, (int)strlen(s)); }
-static void prompt(RimRepl *r) { r->put(r->n ? ". " : "> ", 2); } /* (as wide: lines line up) */
+static void prompt(RimRepl *r) { if (!r->loading) r->put(r->n ? ". " : "> ", 2); } /* (as wide: lines line up) */
 static int blank(const RimRepl *r) { int i; for (i = r->line0; i < r->n; i++) if (r->acc[i] != ' ') return 0; return 1; }
 static int wordch(int c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'; }
 /* a word's color, or 0 for none (types too: plain) */
@@ -238,7 +238,7 @@ static void set_line(RimRepl *r, const char *text, int n) {
 /* history: past lines, oldest first, each ending in \n; back counts how far up the list we've gone */
 static void remember(RimRepl *r) {
   int n = r->n - r->line0, last;
-  if (blank(r) || n + 1 > (int)sizeof r->hist) return;
+  if (r->loading || blank(r) || n + 1 > (int)sizeof r->hist) return;
   for (last = r->hlen - 1; last > 0 && r->hist[last - 1] != '\n'; last--) {} /* (the newest, to skip repeats) */
   if (r->hlen && r->hlen - 1 - last == n && !memcmp(r->hist + last, r->acc + r->line0, (size_t)n)) return;
   while (r->hlen + n + 1 > (int)sizeof r->hist) { /* (room: the oldest go) */
@@ -277,6 +277,75 @@ void rim_repl_stop(RimRepl *r, const char *why) {
   prompt(r);
 }
 
+/* the commands for apps on storage */
+const RimFs *rim_fs;
+static void say(RimRepl *r, const char *s) { r->put(s, (int)strlen(s)); }
+static int app_path(char *path, size_t cap, const char *name, int n) {
+  int i;
+  if (n < 1 || n > 32) return 0;
+  for (i = 0; i < n; i++) if (!(wordch(name[i]) || name[i] == '-')) return 0;
+  return snprintf(path, cap, "/rinc/apps/%.*s/%.*s.rio", n, name, n, name) < (int)cap;
+}
+static void list_one(const char *name, int dir, void *ud) {
+  RimRepl *r = (RimRepl *)ud;
+  if (dir && name[0] != '.') { say(r, name); say(r, "  "); r->saved++; }
+}
+static void load(RimRepl *r, const char *name, int n, int run) {
+  char path[96], buf[256]; int got, i, echo = r->echo;
+  if (!app_path(path, sizeof path, name, n)) { say(r, "names are letters, digits, _ and -\r\n"); return; }
+  if (!rim_fs || rim_fs->open(path, 0)) { say(r, rim_fs ? "can't open " : "no storage: "); say(r, path); say(r, "\r\n"); return; }
+  if (r->restart && r->restart()) { rim_fs->close(); say(r, "can't start a fresh session\r\n"); return; }
+  r->loading = 1; r->errors = 0; r->echo = 0; r->n = 0; r->line0 = r->cur = r->scr = 0;
+  while ((got = rim_fs->read(buf, sizeof buf)) > 0)
+    for (i = 0; i < got; i++) rim_repl_char(r, buf[i] == '\n' ? '\r' : buf[i] == '\r' ? -1 : (unsigned char)buf[i]);
+  if (r->n) rim_repl_char(r, '\r'); /* (an unfinished last line) */
+  rim_fs->close();
+  r->loading = 0; r->echo = echo; r->n = r->line0 = r->cur = r->scr = 0;
+  say(r, r->errors ? "loaded, with errors: " : "loaded "); say(r, path); say(r, "\r\n");
+  if (run && !r->errors) r->run = 1;
+}
+static void save_flush(RimRepl *r) { if (r->nout && rim_fs->write(r->out, r->nout) < 0) r->saving = -1; r->saved += r->nout; r->nout = 0; }
+static void save_char(RimRepl *r, int c) { /* while saving: everything typed goes to the file, until Ctrl-D */
+  if (c == 4 || c == 3) {
+    save_flush(r);
+    say(r, PAINT_PLAIN "\r\n");
+    if (rim_fs->close() || r->saving < 0) say(r, "couldn't save it all\r\n");
+    else if (c == 4) { char b[48]; say(r, "saved "); r->put(b, snprintf(b, sizeof b, "%d bytes\r\n", r->saved)); }
+    else say(r, "gave up (the file has what came before)\r\n");
+    r->saving = 0; prompt(r); return;
+  }
+  if (c == '\n' && r->cr) { r->cr = 0; return; } /* (\r\n: one line break) */
+  r->cr = c == '\r';
+  if (c == '\r') c = '\n';
+  if (c != '\n' && c != '\t' && (c < 32 || c > 126)) return;
+  r->out[r->nout++] = (char)c;
+  if (r->nout == (int)sizeof r->out) save_flush(r);
+  if (r->echo) { if (c == '\n') r->put("\r\n", 2); else { char ch = (char)c; r->put(&ch, 1); } }
+}
+static void save(RimRepl *r, const char *name, int n) {
+  char path[96];
+  if (!app_path(path, sizeof path, name, n)) { say(r, "names are letters, digits, _ and -\r\n"); return; }
+  if (!rim_fs || rim_fs->open(path, 1)) { say(r, rim_fs ? "can't write " : "no storage: "); say(r, path); say(r, "\r\n"); return; }
+  say(r, "saving "); say(r, path); say(r, ": type or paste it, then Ctrl-D (Ctrl-C gives up)\r\n");
+  r->saving = 1; r->saved = 0; r->nout = 0; r->cr = 0;
+}
+/* a command line? (only as a whole input of its own) */
+static int command(RimRepl *r) {
+  const char *s = r->acc; int n = r->n, w;
+  if (r->line0 || r->loading) return 0;
+  while (n && s[n - 1] == ' ') n--;
+  while (n && *s == ' ') { s++; n--; }
+  for (w = 0; w < n && s[w] != ' '; w++) {}
+  if (w == 2 && n == 2 && !memcmp(s, "ls", 2)) {
+    if (!rim_fs) say(r, "no storage\r\n");
+    else { r->saved = 0; if (rim_fs->list("/rinc/apps", list_one, r)) say(r, "no apps (or no card): /rinc/apps\r\n"); else say(r, r->saved ? "\r\n" : "(none yet)\r\n"); }
+    return 1;
+  }
+  if (n > w + 1 && ((w == 4 && !memcmp(s, "load", 4)) || (w == 3 && !memcmp(s, "run", 3)))) { load(r, s + w + 1, n - w - 1, w == 3); return 1; }
+  if (n > w + 1 && w == 4 && !memcmp(s, "save", 4)) { save(r, s + w + 1, n - w - 1); return 1; }
+  return 0;
+}
+
 static void new_line(RimRepl *r) { r->line0 = r->n; r->cur = r->n; r->scr = 0; r->mode = MODE_PLAIN; r->word = -1; r->back = 0; }
 static void key(RimRepl *r, int k) { /* an editing key: A up, B down, C right, D left, H home, F end, 3 delete */
   if (k == 'A' || k == 'B') { recall(r, k == 'A' ? 1 : -1); return; }
@@ -294,6 +363,8 @@ static void key(RimRepl *r, int k) { /* an editing key: A up, B down, C right, D
 }
 
 void rim_repl_char(RimRepl *r, int c) {
+  if (c < 0) return;
+  if (r->saving) { save_char(r, c); return; }
   if (r->esc == 1) { r->esc = c == '[' || c == 'O' ? 2 : 0; r->escn = 0; if (r->esc) return; } /* (else: a lone ESC, then c) */
   else if (r->esc == 2) {
     if (c >= '0' && c <= '9') { r->escn = r->escn * 10 + c - '0'; return; }
@@ -311,11 +382,12 @@ void rim_repl_char(RimRepl *r, int c) {
     if (r->line0 && blank(r)) { r->put("(unfinished input dropped)\r\n", 28); r->n = 0; new_line(r); prompt(r); return; }
     remember(r);
     if (!r->line0 && r->n == 3 && !memcmp(r->acc, "run", 3)) { r->n = 0; new_line(r); r->run = 1; return; } /* the platform takes it from here */
+    if (command(r)) { r->n = 0; new_line(r); if (!r->saving && !r->run) prompt(r); return; }
     if (r->n >= (int)sizeof r->acc - 1) { r->put("(input too long)\r\n", 18); r->n = 0; new_line(r); prompt(r); return; }
     r->acc[r->n++] = '\n';
     res = rio_repl_eval(r->vm, r->acc, (uint32_t)r->n);
     if (res == RIO_MORE) { new_line(r); prompt(r); indent(r); return; }
-    if (res < 0) { const char *e = rio_error(r->vm); r->put(e, (int)strlen(e)); r->put("\r\n", 2); }
+    if (res < 0) { const char *e = rio_error(r->vm); r->errors++; r->put(e, (int)strlen(e)); r->put("\r\n", 2); }
     r->n = 0; new_line(r);
     prompt(r);
   } else if (c == 8 || c == 127) { /* backspace (in the indent, a step) */

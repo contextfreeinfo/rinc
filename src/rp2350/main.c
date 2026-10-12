@@ -16,6 +16,7 @@
 #include "video.h"
 #include "keyboard.h"
 #include "gamepad.h"
+void rim_sd_setup(void); /* sd.c: the SD card, as rim_fs */
 #include "rim_audio.h"
 #include "tusb.h" /* (HID key codes) */
 
@@ -48,6 +49,11 @@ static void game_frame(void) {
   if (res) { repl.run = 0; rim_repl_stop(&repl, res > 0 ? "nothing to run: define update* or draw*" : rio_error(&vm)); }
 }
 static float now(void) { return (float)((double)time_us_64() / 1e6); }
+/* a fresh session, for the REPL's load: the app space as at the start */
+static int restart(void) {
+  return rim_start(&vm, rio_mem, RIO_MEM - REPL_SCRATCH, put) || rio_jit(&vm, jit_code, sizeof jit_code) < 0 ||
+         rio_repl_begin(&vm, rio_mem + RIO_MEM - REPL_SCRATCH, REPL_SCRATCH, 0);
+}
 
 int main(void) {
   int ok;
@@ -61,9 +67,11 @@ int main(void) {
   rim_audio_setup();
   rim_video_start(); /* (core 1: video, then sound) */
   rim_keyboard_start();
+  rim_sd_setup();
   if (!ok || rim_repl_begin(&repl, &vm, rio_mem + RIO_MEM - REPL_SCRATCH, REPL_SCRATCH)) {
     for (;;) { printf("rim: can't start: %s\r\n", rio_error(&vm)); sleep_ms(1000); }
   }
+  repl.restart = restart;
   for (;;) { /* the REPL takes typing from a USB keyboard and from the USB serial port */
     static int was_connected;
     if (repl.run) { game_frame(); continue; }

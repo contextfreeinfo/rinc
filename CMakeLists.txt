@@ -56,12 +56,13 @@ if(RIM_PLATFORM STREQUAL rp2350)
   # sources compiled here (tinyusb_host would turn the native port into a host too: it stays a device,
   # for the serial port); tusb_config.h in src/rp2350 configures both
   set(TUSB ${PICO_SDK_PATH}/lib/tinyusb/src)
-  add_executable(rim src/rp2350/main.c src/rp2350/video.c src/rp2350/keyboard.c src/rp2350/audio.c src/rp2350/hdmi_packet.c src/rp2350/gamepad.c
+  add_executable(rim src/rp2350/main.c src/rp2350/video.c src/rp2350/keyboard.c src/rp2350/audio.c src/rp2350/hdmi_packet.c src/rp2350/gamepad.c src/rp2350/sd.c
+    lib/fatfs/ff.c lib/fatfs/ffunicode.c
     ${TUSB}/host/usbh.c ${TUSB}/host/hub.c ${TUSB}/class/hid/hid_host.c ${TUSB}/portable/raspberrypi/pio_usb/hcd_pio_usb.c)
-  target_include_directories(rim BEFORE PRIVATE src/rp2350)
+  target_include_directories(rim BEFORE PRIVATE src/rp2350 lib/fatfs) # (sd.c: the SD card, through FatFs)
   target_compile_definitions(rim PRIVATE PICO_STACK_SIZE=0x1000 PICO_CORE1_STACK_SIZE=0x800)
   pico_generate_pio_header(rim ${CMAKE_CURRENT_LIST_DIR}/src/rp2350/i2s.pio) # audio.c: sound out of the 3.5 mm jack
-  target_link_libraries(rim PRIVATE rimcore pico_stdlib pico_multicore hardware_dma hardware_irq hardware_clocks hardware_pio hardware_i2c
+  target_link_libraries(rim PRIVATE rimcore pico_stdlib pico_multicore hardware_dma hardware_irq hardware_clocks hardware_pio hardware_i2c hardware_spi
     tinyusb_pico_pio_usb)
   pico_enable_stdio_usb(rim 1)  # the REPL talks over USB serial
   pico_enable_stdio_uart(rim 0)

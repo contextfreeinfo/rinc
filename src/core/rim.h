@@ -63,7 +63,24 @@ void rim_char(int c, int x, int y, int fg, int bg); /* bg < 0: transparent */
 void rim_console_put(const char *s, int n);
 void rim_console_clear(int bg);
 
-/* a REPL over any text stream: feed it characters, it echoes them and runs each complete input */
+/* files, where the platform has storage (else rim_fs is NULL): one open at a time. open: 0 or -1
+   (writing makes the directories along the path, and replaces the file); read: bytes read, 0 at its
+   end, -1 failed; write: n, or -1; list: each entry of a directory, with whether it's one too.
+   Apps live in /rinc/apps/<name>/<name>.rio */
+typedef struct {
+  int (*open)(const char *path, int write);
+  int (*read)(char *buf, int n);
+  int (*write)(const char *buf, int n);
+  int (*close)(void);
+  int (*list)(const char *dir, void (*each)(const char *name, int dir, void *ud), void *ud);
+} RimFs;
+extern const RimFs *rim_fs;
+
+/* a REPL over any text stream: feed it characters, it echoes them and runs each complete input.
+   Besides rio, it knows a few commands, each a line on its own: run (the game loop, for what's been
+   typed), and with storage: ls (the apps), load name (an app's source, as if typed, into a fresh
+   session: restart gives one), run name (load, then run), save name (what's typed next, until
+   Ctrl-D, becomes the app's source; Ctrl-C gives up) */
 typedef struct {
   Rio *vm;
   void (*put)(const char *s, int n);
@@ -75,6 +92,8 @@ typedef struct {
      arriving, the color state at the line's end (mode, and where its unfinished word starts) */
   int cur, scr, esc, escn, mode, word; const char *wp; /* wp: the unfinished word's color now */
   char hist[1024], draft[256]; int hlen, back, draftn; /* lines typed before, and the one being typed */
+  int (*restart)(void); /* a fresh rio session, for load (0: done) */
+  int loading, errors, saving, saved, cr; char out[256]; int nout; /* load and save as they go */
 } RimRepl;
 int rim_repl_begin(RimRepl *r, Rio *vm, void *scratch, uint32_t size);
 void rim_repl_stop(RimRepl *r, const char *why); /* the game loop ended (why: NULL, or a message) */

@@ -7,6 +7,7 @@ others and keep their own licenses; their notices travel with builds that includ
 |---|---|---|
 | TLV320DAC3100 register settings, from wili8jam (which took them from fruitjam-doom) | `src/rp2350/audio.c` | MIT (below) |
 | HDMI data island packet encoding, from pico_hdmi | `src/rp2350/hdmi_packet.c`, `.h` | Unlicense (public domain) |
+| FatFs R0.15a, by ChaN (the SD card's filesystem) | `lib/fatfs` (board builds) | 1-clause BSD style (`lib/fatfs/LICENSE.txt`) |
 | Pico-PIO-USB | `lib/Pico-PIO-USB` (submodule; board builds) | MIT, Copyright (c) 2021 sekigon-gonnoc |
 | Raspberry Pi Pico SDK | linked into board builds | BSD 3-Clause, Copyright (c) Raspberry Pi Ltd |
 | TinyUSB (in the Pico SDK) | linked into board builds | MIT, Copyright (c) Ha Thach (tinyusb.org) |

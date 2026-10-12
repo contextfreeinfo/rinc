@@ -13,8 +13,10 @@ each push).
 ```
 lib/rio/           rio, as a git submodule
 lib/Pico-PIO-USB/  USB host over PIO, for keyboards on the Fruit Jam
+lib/fatfs/         FatFs, the SD card's filesystem (vendored)
 src/core/          shared by every platform: the screen, palette, font and console, host procs, the REPL
-src/rp2350/        the Fruit Jam: HDMI out (video.c), USB keyboards (keyboard.c), the main loop
+src/rp2350/        the Fruit Jam: HDMI out (video.c), USB keyboards (keyboard.c) and controllers
+                   (gamepad.c), sound (audio.c), the SD card (sd.c), the main loop
 src/desktop/       a window (SDL3, built in) or headless
 src/web/           wasm for a web page, and the page around it (page.html)
 tools/             font.py (the font table), web.py (a cart as one HTML page, or just the wasm), send.py
@@ -82,6 +84,19 @@ python -m serial.tools.miniterm COM3 115200 --eol CR   # pip install pyserial; C
 ```
 
 A keyboard's volume knob or keys set the system volume (both outputs, in 2.5 dB steps; mute too).
+
+**Apps on the SD card.** A FAT32 card in the slot holds apps, each in its own folder named for it, its
+source named the same way (as rio's modules are): `/rinc/apps/chord/chord.rio`. At the REPL:
+
+```
+ls              the apps on the card
+run chord       load it into a fresh session, and start it
+load chord      just load it (its procs and globals are there to use)
+save chord      what's typed or pasted next, until Ctrl-D, becomes the app (Ctrl-C gives up)
+```
+
+`uv run tools/send.py carts/*.rio --save` puts carts on the card over USB serial; a card reader works
+too. (A first version: a launcher apart from the REPL comes next.)
 
 The REPL edits the line being typed (left and right, Home and End or Ctrl-A and Ctrl-E, Backspace and
 Delete; up and down go back through earlier lines), colors it (keywords, constants, comments),
