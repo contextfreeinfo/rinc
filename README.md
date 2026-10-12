@@ -15,7 +15,8 @@ src/rp2350/        the Fruit Jam: HDMI out (video.c), USB keyboards (keyboard.c)
 src/desktop/       a window (SDL3, built in) or headless
 src/web/           wasm for a web page, and the page around it (page.html)
 tools/             font.py (the font table), web.py (a cart as one HTML page, or just the wasm), send.py
-                   (a cart to the board), embed.cmake (the web player, built into the desktop rim)
+                   (a cart to the board), embed.cmake (the web player, built into the desktop rim),
+                   adpcm.py (sound into IMA ADPCM)
 carts/             rio programs
 ```
 
@@ -31,8 +32,28 @@ Carts draw into one 320x240 screen of 8-bit palette indexes, through host procs:
 | `print(s, x, y, c)` | text, in the 5x8 font, 6 pixels a character |
 | `btn(i) -> Int` | 1 while button i is held: 0 left, 1 right, 2 up, 3 down (arrows), 4 O (Z or C), 5 X (X or V) |
 | `time() -> Float` | seconds since start |
+| `fromHex(out, text) -> Int` | bytes from hex digits into a Blob (anything else in the text is skipped), until it's full: how many. For data typed into a cart |
 
 The palette is the PICO-8 16 colors, then a 6x6x6 color cube, then 24 grays.
+
+**Sound.** 8 voices, numbered 0 to 7, mixed to 48 kHz 16-bit stereo, out of HDMI and the 3.5 mm jack
+on the board. A voice plays sound straight from the cart's memory, at any rate, with linear
+interpolation:
+
+| proc | |
+|---|---|
+| `sound(v, data, bits, channels, rate)` | play data on voice v, once, at rate frames a second: bits 16 or 8 (signed), or 4 for IMA ADPCM; 1 or 2 channels |
+| `soundWav(v, data) -> Int` | play a WAV file's sound at its own rate (16-bit PCM or IMA ADPCM, mono or stereo): 1 if it could |
+| `soundRate(v, rate)`, `soundVolume(v, 0..1)`, `soundPan(v, -1..1)` | change it while it plays |
+| `soundLoop(v, start, end)` | from frame end, go back to start, over and over (end 0: no loop) |
+| `soundStop(v)`, `soundPlaying(v) -> Int` | |
+
+IMA ADPCM is a quarter the size of 16-bit and close to it in sound (a test chord: 38 dB signal to
+noise), so it's the way to keep recorded sound in memory: a second of 22 kHz mono is 11 KB. It's laid
+out as in WAV files (format 0x11), in blocks of 256 bytes a channel for `sound`. `tools/adpcm.py`
+makes it from a 16-bit WAV, as a WAV file or as rio source for `fromHex` (`--tone` makes a test
+chord): see `carts/chord.rio`. Mixing 8 ADPCM voices takes about 13% of a core on the board; 16-bit,
+about 6%.
 
 A game defines `update* :: proc()` and `draw* :: proc()` (both optional, marked `*` so Rim can find
 them), as on PICO-8: Rim calls `update` then `draw` 60 times a second. The top-level code runs once
@@ -80,7 +101,9 @@ that an exported game draws exactly what rim does.
 
 `-export` writes a copy of rim with the cart after it, compiled (`breakout.exe` on Windows: give the
 name you want). Started with no cart, it runs the one it carries, in a window, or headless with
-`-frames`. Exports are as portable as the rim that made them: Windows, macOS or Linux.
+`-frames`. With `-runner rim-linux-x86_64` it copies that rim instead, such as another system's from a
+release, so one machine can make games for all three (on Linux and macOS, `chmod +x` a game made
+elsewhere).
 
 ## The web
 

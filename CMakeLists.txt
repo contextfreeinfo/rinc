@@ -51,6 +51,7 @@ if(RIM_PLATFORM STREQUAL rp2350)
   if(RIM_RIO_IN_RAM)
     target_compile_definitions(riocore PRIVATE RIO_HOT_SECTION=".time_critical.rio")
   endif()
+  target_compile_definitions(rimcore PRIVATE RIM_HOT_SECTION=".time_critical.rim") # the sound mixer, in RAM
   # video.c: HDMI out through the HSTX, on core 1. keyboard.c: TinyUSB's host stack over PIO-USB, its
   # sources compiled here (tinyusb_host would turn the native port into a host too: it stays a device,
   # for the serial port); tusb_config.h in src/rp2350 configures both

@@ -47,6 +47,20 @@ static void h_print(Rio *v, RioVal *a) { /* print(s, x, y, c): text at pixel x, 
 }
 static void h_btn(Rio *v, RioVal *a) { (void)v; a[0].i = a[0].u < 8 ? rim_buttons >> a[0].i & 1 : 0; }
 static void h_time(Rio *v, RioVal *a) { (void)v; a[0].f = rim_time ? rim_time() : 0; }
+/* fromHex(out, text): bytes from hex digits (pairs; anything else between them, such as spaces and
+   line breaks, is skipped) into out, until it's full. Returns how many. For binary data typed into a
+   cart: sound, pictures */
+static int hexdigit(int c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1; }
+static void h_fromhex(Rio *v, RioVal *a) {
+  uint8_t *out = (uint8_t *)rio_ptr(v, a); const char *t = (const char *)rio_ptr(v, a + 2);
+  uint32_t cap = a[1].u, n = a[3].u, i, k = 0; int hi = -1;
+  for (i = 0; out && t && i < n && k < cap; i++) {
+    int d = hexdigit(t[i]);
+    if (d < 0) continue;
+    if (hi < 0) hi = d; else { out[k++] = (uint8_t)(hi << 4 | d); hi = -1; }
+  }
+  a[0].u = k;
+}
 
 static void log_line(void *ud, const char *s, int n) { (void)ud; rim_put(s, n); rim_put("\r\n", 2); }
 
@@ -57,7 +71,8 @@ int rim_start(Rio *vm, void *mem, uint32_t memsize, void (*put)(const char *s, i
   rim_audio_reset();
   rio_set_log(vm, log_line, 0);
   if (rio_ffi(vm, "cls", "i", h_cls) || rio_ffi(vm, "pset", "iii", h_pset) || rio_ffi(vm, "pget", "ii>i", h_pget) ||
-      rio_ffi(vm, "rect", "iiiii", h_rect) || rio_ffi(vm, "print", "siii", h_print) || rio_ffi(vm, "btn", "i>i", h_btn) || rim_audio_procs(vm) || rio_ffi(vm, "time", ">f", h_time)) return -1;
+      rio_ffi(vm, "rect", "iiiii", h_rect) || rio_ffi(vm, "print", "siii", h_print) || rio_ffi(vm, "btn", "i>i", h_btn) || rim_audio_procs(vm) || rio_ffi(vm, "time", ">f", h_time) ||
+      rio_ffi(vm, "fromHex", "bs>i", h_fromhex)) return -1;
   return 0;
 }
 

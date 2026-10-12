@@ -32,6 +32,12 @@ int rim_frame(Rio *vm);
    thread or in an interrupt (called with 1 before a host proc changes a voice, 0 after) */
 #define RIM_RATE 48000
 #define RIM_VOICES 8
+#ifdef RIM_HOT_SECTION /* where code that runs all the time goes: the RP2350 puts it in RAM, not flash */
+#define RIM_HOT __attribute__((section(RIM_HOT_SECTION)))
+#else
+#define RIM_HOT
+#endif
+#define RIM_ADPCM_BLOCK 256 /* sound(..., 4, ...): ADPCM blocks of this many bytes a channel (505 frames) */
 void rim_audio_mix(int16_t *stereo, int frames);
 void rim_audio_reset(void); /* every voice stops */
 extern void (*rim_audio_lock)(int on);
