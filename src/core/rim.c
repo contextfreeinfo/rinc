@@ -60,7 +60,7 @@ int rim_start(Rio *vm, void *mem, uint32_t memsize, void (*put)(const char *s, i
   return 0;
 }
 
-/* the REPL: lines gather until rio has a complete input; a blank line gives up on an unfinished one */
+/* a game's frame: update then draw */
 int rim_frame(Rio *vm) {
   int u = rio_func(vm, "update"), d = rio_func(vm, "draw");
   if (u < 0 && d < 0) return 1;
@@ -69,6 +69,8 @@ int rim_frame(Rio *vm) {
   return 0;
 }
 
+#ifndef RIO_NO_COMPILER /* (a vm that only runs images has no REPL) */
+/* the REPL: lines gather until rio has a complete input; a blank line gives up on an unfinished one */
 static void prompt(RimRepl *r) { r->put(r->n ? ".. " : "> ", r->n ? 3 : 2); }
 
 int rim_repl_begin(RimRepl *r, Rio *vm, void *scratch, uint32_t size) {
@@ -107,3 +109,4 @@ void rim_repl_char(RimRepl *r, int c) {
     r->acc[r->n++] = ch; if (r->echo) r->put(&ch, 1);
   }
 }
+#endif

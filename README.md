@@ -79,8 +79,11 @@ it without a window.
 python tools/web.py carts/breakout.rio breakout.html
 ```
 
-makes one self-contained page: rio and Rim's core as wasm (built with `zig cc`, no emscripten), a small
-JS host and the cart's source, about 160 KB (65 KB gzipped). Open it from disk or any server.
+makes one self-contained page: the cart compiled to an image (by `rim -i`, so build the desktop rim
+first), Rim's VM as wasm with no compiler in it (built with `zig cc`, no emscripten), and a small JS
+host. Breakout comes to 47 KB (22 KB gzipped): 31 KB of wasm and a 2.4 KB image. Open it from disk or
+any server. A cart whose code calls a host proc that compiles rio at runtime would get the compiler
+too (none exist yet).
 
 ## Working on rio at the same time
 
@@ -96,10 +99,11 @@ When a rio change is pushed, move the submodule to it: `git -C lib/rio pull` and
 ## Memory on the RP2350
 
 Of 520 KB of SRAM: apps get 256 KB, for their code and data both (rio compiles inside the same memory,
-so nothing extra is needed for the compiler, and the code takes only its own size). The screen and the
-copy being shown take 150 KB, the REPL's compiler tables 32 KB, native loops 16 KB, rio's interpreter
-loop 10 KB (in SRAM, as it runs faster there), and USB, stacks and the rest about 40 KB: under 2 KB is
-left. No PSRAM needed. Run `rio -m cart.rio` on the desktop to see where a cart's memory goes.
+so nothing extra is needed for the compiler, and the code takes only its own size). While the REPL
+runs, it keeps its compiler tables in the top 32 KB of that. The screen and the copy being shown take
+150 KB, native loops 16 KB, rio's interpreter loop 10 KB (in SRAM, as it runs faster there), and USB,
+the console and stacks most of the rest: about 32 KB is free, for audio next. No PSRAM needed.
+Run `rio -m cart.rio` on the desktop to see where a cart's memory goes.
 
 ## License
 

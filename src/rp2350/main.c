@@ -3,11 +3,12 @@
 
    Memory, of the RP2350's 520 KB of SRAM:
      app space            256 KB  (rio: the program's code and data; the compiler borrows it while
-                                   compiling; the REPL keeps a quarter of it for code)
-     REPL compiler tables  32 KB  (only while a REPL session is open)
-     screen                75 KB  (one buffer so far; the DMA copy for video adds another 75 KB)
+                                   compiling. The REPL takes its top 32 KB for its compiler tables,
+                                   and a quarter of the rest for code, as code keeps coming)
+     screen               150 KB  (drawn into, and the copy being shown)
+     native loops          16 KB  (rio_jit: loops compiled to Thumb-2)
      rio's interpreter     10 KB  (its loop runs from SRAM: see RIM_RIO_IN_RAM)
-     native loops          16 KB  (rio_jit: loops of integer math compiled to Thumb-2) */
+     USB, console, stacks  the rest */
 #include <stdio.h>
 #include "pico/stdlib.h"
 #include "hardware/clocks.h"
@@ -16,12 +17,11 @@
 #include "keyboard.h"
 #include "tusb.h" /* (HID key codes) */
 
-#define RIO_MEM (256 << 10)
-#define REPL_SCRATCH (32 << 10)
+#define RIO_MEM (256 << 10)      /* the app space */
+#define REPL_SCRATCH (32 << 10)  /* the REPL's compiler tables: the app space's top, while the REPL runs */
 
 static _Alignas(16) uint8_t rio_mem[RIO_MEM];
 static _Alignas(8) uint8_t jit_code[16 << 10]; /* simple loops, compiled to machine code (SRAM runs code) */
-static _Alignas(16) uint8_t repl_scratch[REPL_SCRATCH];
 static Rio vm;
 static RimRepl repl;
 
@@ -51,12 +51,12 @@ int main(void) {
   rim_keyboard_setup();
   stdio_init_all();
   rim_time = now;
-  ok = !rim_start(&vm, rio_mem, sizeof rio_mem, put) && rio_jit(&vm, jit_code, sizeof jit_code) >= 0;
+  ok = !rim_start(&vm, rio_mem, RIO_MEM - REPL_SCRATCH, put) && rio_jit(&vm, jit_code, sizeof jit_code) >= 0;
   rim_console_clear(1);
   rim_console_put("Rim\r\n\r\n", 7);
   rim_video_start();
   rim_keyboard_start();
-  if (!ok || rim_repl_begin(&repl, &vm, repl_scratch, sizeof repl_scratch)) {
+  if (!ok || rim_repl_begin(&repl, &vm, rio_mem + RIO_MEM - REPL_SCRATCH, REPL_SCRATCH)) {
     for (;;) { printf("rim: can't start: %s\r\n", rio_error(&vm)); sleep_ms(1000); }
   }
   for (;;) { /* the REPL takes typing from a USB keyboard and from the USB serial port */

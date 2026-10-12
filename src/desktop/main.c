@@ -4,6 +4,9 @@
                                draw* 60 times a second if it's a game (arrows, Z/X: btn; Esc quits)
      -frames n                 instead of a window, run n frames (Z held for the first few)
      -o screen.ppm             instead of a window, afterwards write the screen as an image
+     -i cart.img               compile to an image (see rio_image_load) instead, and list the host
+                               procs its code calls (tools/web.py uses both)
+   The app space is 256 KB, as on the Fruit Jam and the web, so a cart that fits one fits all three.
    The window is SDL3, linked in statically (RIM_SDL, on by default). */
 #define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
@@ -16,7 +19,7 @@
 #include <SDL3/SDL_main.h>
 #endif
 
-static uint8_t rio_mem[1 << 20], repl_scratch[1 << 18];
+static uint8_t rio_mem[256 << 10], repl_scratch[1 << 18], image[512 << 10];
 static char src[1 << 20];
 static Rio vm;
 static RimRepl repl;
@@ -37,6 +40,19 @@ static int save_ppm(const char *path) { /* the screen through the palette, as 8-
       fwrite(rgb, 1, 3, f);
     }
   return fclose(f);
+}
+
+/* -i: the compiled cart as an image, and the host procs its code calls, one per line */
+#define OPENUM(o) OP_##o,
+enum { RIO_OPS(OPENUM) OP_COUNT };
+static int save_image(const char *cart, const char *path, size_t n) {
+  uint32_t size, pc; uint8_t used[RIO_MAX_FFI] = {0}; FILE *f; int k;
+  if (rio_compile(&vm, src, (uint32_t)n)) { fprintf(stderr, "%s:%s\n", cart, rio_error(&vm)); return 1; }
+  for (pc = 0; pc < vm.pc; pc++) if (vm.code[pc].op == OP_FFI && vm.code[pc].c < RIO_MAX_FFI) used[vm.code[pc].c] = 1;
+  for (k = 0; k < vm.nffi; k++) if (used[k]) printf("host %s\n", vm.ffi[k].name);
+  if (!(size = rio_image_save(&vm, image, sizeof image))) { fprintf(stderr, "rim: can't make an image\n"); return 1; }
+  if (!(f = fopen(path, "wb")) || fwrite(image, 1, size, f) != size || fclose(f)) { fprintf(stderr, "rim: can't write %s\n", path); return 1; }
+  return 0;
 }
 
 #if RIM_SDL
@@ -82,10 +98,11 @@ static int window(const char *title) {
 #endif
 
 int main(int argc, char **argv) {
-  const char *cart = 0, *out = 0; int i, fn, frames = 0;
+  const char *cart = 0, *out = 0, *img = 0; int i, fn, frames = 0;
   for (i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "-o") && i + 1 < argc) out = argv[++i];
     else if (!strcmp(argv[i], "-frames") && i + 1 < argc) frames = atoi(argv[++i]);
+    else if (!strcmp(argv[i], "-i") && i + 1 < argc) img = argv[++i];
     else if (argv[i][0] == '-' || cart) { fprintf(stderr, "usage: rim [cart.rio] [-frames n] [-o screen.ppm]\n"); return 2; }
     else cart = argv[i];
   }
@@ -95,6 +112,7 @@ int main(int argc, char **argv) {
     FILE *f = fopen(cart, "rb"); size_t n;
     if (!f) { fprintf(stderr, "rim: can't open %s\n", cart); return 2; }
     n = fread(src, 1, sizeof src, f); fclose(f);
+    if (img) return save_image(cart, img, n);
     if (rio_compile(&vm, src, (uint32_t)n) || rio_run(&vm) || ((fn = rio_func(&vm, "main")) >= 0 && rio_call(&vm, fn))) {
       fflush(stdout); fprintf(stderr, "%s:%s\n", cart, rio_error(&vm)); return 1;
     }
