@@ -108,4 +108,5 @@ Run `rio -m cart.rio` on the desktop to see where a cart's memory goes.
 
 ## License
 
-MIT
+CC0 1.0: dedicated to the public domain (see LICENSE). Code from others keeps its own license:
+see THIRD_PARTY.md.

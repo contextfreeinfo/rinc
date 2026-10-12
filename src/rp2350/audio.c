@@ -14,6 +14,7 @@
 #include "hardware/sync.h"
 #include "rim.h"
 #include "rim_audio.h"
+#include "video.h"
 #include "i2s.pio.h"
 
 #define PIN_DIN 24
@@ -51,10 +52,10 @@ static void dac_setup(void) {
   mod(0x3F, 0xC0, 0xC0);                                  /* both DACs on */
   reg(0x00, 1); mod(0x23, 0xCC, 0x44); reg(0x00, 0);     /* DACs to the output mixers */
   mod(0x40, 0x0C, 0x00); reg(0x41, 0x00); reg(0x42, 0x00); /* unmuted, 0 dB */
-  reg(0x00, 1);                                           /* headphone drivers: on, unmuted, some gain */
+  reg(0x00, 1);                                           /* headphone drivers: on, unmuted, 0 dB of gain */
   mod(0x1F, 0xC0, 0xC0); mod(0x28, 0x04, 0x04); mod(0x29, 0x04, 0x04);
   reg(0x24, 0x0A); reg(0x25, 0x0A);
-  mod(0x28, 0x78, 0x40); mod(0x29, 0x78, 0x40);
+  mod(0x28, 0x78, 0x00); mod(0x29, 0x78, 0x00);           /* (wili8jam: 8 dB; full-scale sound was too loud on headphones) */
   reg(0x00, 0);
 }
 
@@ -64,6 +65,7 @@ static void audio_lock(int on) { if (on) spin_lock_unsafe_blocking(lock); else s
 static void __not_in_flash_func(refill)(uint32_t *b) {
   int16_t *s = (int16_t *)(void *)b; int f, k;
   for (k = 0; k < FRAMES; k += 64) { spin_lock_unsafe_blocking(lock); rim_audio_mix(s + k * 2, 64); spin_unlock_unsafe(lock); }
+  rim_hdmi_sound(s, FRAMES); /* the same sound over HDMI */
   for (f = 0; f < FRAMES; f++) b[f] = b[f] << 16 | b[f] >> 16; /* (memory has left first, in the low half) */
 }
 static void __not_in_flash_func(audio_done)(void) {

@@ -7,7 +7,7 @@ end
 balls: [..64]Ball
 blip: Blob[1200] # a falling square wave, 8-bit, played at 22050 a second
 for i in 0..<1200
-  v := (1200 - i) / 10
+  v := (1200 - i) / 30 # (a third of full scale: square waves are harsh)
   if i / 12 % 2 == 1
     v = -v
   end
