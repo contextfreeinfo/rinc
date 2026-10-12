@@ -17,6 +17,7 @@
 #include "keyboard.h"
 #include "gamepad.h"
 void rim_sd_setup(void); /* sd.c: the SD card, as rim_fs */
+extern const char rim_launcher_src[]; extern const int rim_launcher_src_len; /* system/launcher.rio, built in */
 #include "rim_audio.h"
 #include "tusb.h" /* (HID key codes) */
 
@@ -32,21 +33,46 @@ static RimRepl repl;
 static void put(const char *s, int n) { fwrite(s, 1, (size_t)n, stdout); fflush(stdout); if (!repl.run) rim_console_put(s, n); }
 #define DOWN(k) (rim_keys_down[(k) >> 3] >> ((k) & 7) & 1)
 
+static int restart(void);
+/* home: the launcher, in a fresh session (the system's way out of anything) */
+static void home(void) {
+  rim_audio_reset(); rim_console_clear(1);
+  if (rim_repl_source(&repl, rim_launcher_src, rim_launcher_src_len)) rim_repl_stop(&repl, "the launcher didn't start");
+}
+static int system_key(void) { /* the Windows key, or a controller's Xbox button: pressed just now */
+  static int was; int now = DOWN(HID_KEY_GUI_LEFT) || DOWN(HID_KEY_GUI_RIGHT) || rim_pad_guide, pressed = now && !was;
+  was = now;
+  return pressed;
+}
 /* a game: a frame at each vertical blank, right after the screen was copied for showing */
 static void game_frame(void) {
-  static uint32_t last; int res;
-  while (rim_frames == last) { int c = rim_keyboard_char(); if (c >= 0 && c != 27) rim_text_push(c); } /* (typing goes to key()) */
+  static uint32_t last; int res, stop = 0;
+  while (rim_frames == last) { /* (typing goes to key(); editing keys, sent as ESC [ ..., are buttons instead) */
+    int c = rim_keyboard_char();
+    if (c == 27) { do c = rim_keyboard_char(); while (c >= 0 && !((c >= 'A' && c <= 'Z') || c == '~')); continue; }
+    if (c == 3) stop = 1; /* (Ctrl+C) */
+    else if (c >= 0) rim_text_push(c);
+  }
   last = rim_frames;
   while ((res = getchar_timeout_us(0)) != PICO_ERROR_TIMEOUT && res != 27 && res != 3) rim_text_push(res); /* (serial typing too) */
-  if (DOWN(HID_KEY_ESCAPE) || res == 27 || res == 3) { /* Esc, on the keyboard or over serial (or Ctrl-C) */
-    rim_console_put("\r\n", 2); rim_repl_stop(&repl, "stopped"); return;
-  }
   rim_pad_read();
+  if (stop || res == 3) { /* Ctrl-C, on the keyboard or over serial: stop, into the console, with what was running still there */
+    rim_audio_reset(); rim_console_clear(1); rim_repl_stop(&repl, "stopped"); return;
+  }
+  if (system_key() || DOWN(HID_KEY_ESCAPE) || res == 27) { /* home: the system key, or (for now) Esc, on the keyboard or over serial */
+    home(); return;
+  }
   rim_buttons = rim_pad_buttons | (uint16_t)(DOWN(HID_KEY_ARROW_LEFT) * RIM_LEFT | DOWN(HID_KEY_ARROW_RIGHT) * RIM_RIGHT |
     DOWN(HID_KEY_ARROW_UP) * RIM_UP | DOWN(HID_KEY_ARROW_DOWN) * RIM_DOWN | DOWN(HID_KEY_V) * RIM_A |
     DOWN(HID_KEY_C) * RIM_B | DOWN(HID_KEY_X) * RIM_X | DOWN(HID_KEY_Z) * RIM_Y);
   res = rim_frame(&vm);
   if (res) { repl.run = 0; rim_repl_stop(&repl, res > 0 ? "nothing to run: define update* or draw*" : rio_error(&vm)); }
+  if (rim_launch) { /* the launcher chose */
+    int which = rim_launch; rim_launch = 0;
+    rim_audio_reset(); rim_console_clear(1);
+    if (which == 1 && rim_repl_app(&repl, rim_launch_name, 1)) { rim_console_put("\r\n(Windows key: back to the launcher)\r\n", 39); rim_repl_stop(&repl, 0); }
+    if (which == 2) { repl.run = 0; if (!restart()) rim_console_put("Console: rio, typed and run. The Windows key goes back.\r\n", 56); rim_repl_stop(&repl, 0); }
+  }
 }
 static float now(void) { return (float)((double)time_us_64() / 1e6); }
 /* a fresh session, for the REPL's load: the app space as at the start */
@@ -72,13 +98,17 @@ int main(void) {
     for (;;) { printf("rim: can't start: %s\r\n", rio_error(&vm)); sleep_ms(1000); }
   }
   repl.restart = restart;
+  home(); /* (the board starts in the launcher) */
   for (;;) { /* the REPL takes typing from a USB keyboard and from the USB serial port */
     static int was_connected;
     if (repl.run) { game_frame(); continue; }
+    rim_pad_read();
+    if (system_key()) { home(); continue; }
     int c = rim_keyboard_char(), connected = stdio_usb_connected();
     if (connected && !was_connected) { sleep_ms(100); printf("%s", rim_keyboard_events()); } /* a terminal arrived */
     was_connected = connected;
     if (c >= 0) rim_repl_char(&repl, c);
     if ((c = getchar_timeout_us(0)) != PICO_ERROR_TIMEOUT) rim_repl_char(&repl, c);
+    if (rim_launch == 3) { rim_launch = 0; home(); }
   }
 }

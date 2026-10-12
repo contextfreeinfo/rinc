@@ -1,0 +1,210 @@
+# Launcher: the apps on the card, and the console. Type to narrow the list, up and down to choose,
+# Enter to start one (or the d-pad and A). Esc clears what's typed. Built into the firmware: the
+# board starts here, and the Windows key (or a controller's Xbox button) comes back. An app's title and
+# description come from its first line, as "# Title: what it does".
+
+names: Blob[2048] # every app's folder name, one after another
+infos: Blob[6144] # and its first line
+nameAt: [64]Int
+nameLen: [64]Int
+infoAt: [64]Int
+infoLen: [64]Int
+titleLen: [64]Int # the part of its first line before the colon (0: none, so the name)
+count := 0
+shown: [65]Int # what's listed: -1 the console, else an app's number
+nshown := 0
+filter: Blob[..24]
+pick := 0
+held := 0
+repeat := 0
+
+refresh :: proc()
+  count = min(apps(), 64)
+  at := 0
+  bt := 0
+  for i in 0..<count
+    nameAt[i] = at
+    nameLen[i] = min(appName(i, names[at:at + 32]), 32)
+    at += nameLen[i]
+    infoAt[i] = bt
+    infoLen[i] = min(appInfo(i, infos[bt:bt + 96]), 96)
+    titleLen[i] = 0
+    for k in 0..<min(infoLen[i], 24)
+      if titleLen[i] == 0 and infos[bt + k] == 58 # (the colon)
+        titleLen[i] = k
+      end
+    end
+    bt += infoLen[i]
+  end
+end
+refresh()
+
+lower :: proc(c: Int) -> Int
+  if c >= 65 and c <= 90
+    return c + 32
+  end
+  return c
+end
+
+# whether text has what's typed in it, ignoring case
+has :: proc(text: Blob) -> Bool
+  f := filter.len()
+  for s in 0..<text.len() - f + 1
+    k := 0
+    for k < f and lower(text[s + k]) == lower(filter[k])
+      k += 1
+    end
+    if k == f
+      return true
+    end
+  end
+  return false
+end
+
+title :: proc(i: Int) -> Blob
+  if titleLen[i] > 0
+    return infos[infoAt[i]:infoAt[i] + titleLen[i]]
+  end
+  return names[nameAt[i]:nameAt[i] + nameLen[i]]
+end
+
+consoleName: Blob[7]
+for ch, i in "console"
+  consoleName[i] = ch
+end
+
+narrow :: proc()
+  nshown = 0
+  if has(consoleName)
+    shown[nshown] = -1
+    nshown += 1
+  end
+  for i in 0..<count
+    if has(names[nameAt[i]:nameAt[i] + nameLen[i]]) or has(title(i))
+      shown[nshown] = i
+      nshown += 1
+    end
+  end
+  pick = max(0, min(pick, nshown - 1))
+end
+narrow()
+
+start :: proc()
+  if nshown == 0
+    return
+  end
+  k := shown[pick]
+  if k < 0
+    openConsole()
+  else
+    launch(names[nameAt[k]:nameAt[k] + nameLen[k]].asString())
+  end
+end
+
+update* :: proc()
+  c := key()
+  for c >= 0
+    if c == 13
+      start()
+    else
+      if c == 8
+        if filter.len() > 0
+          filter.pop()
+        end
+      else
+        if c == 27
+          filter.clear()
+        else
+          if c >= 32 and filter.len() < 24
+            ok := filter.push(c)
+          end
+        end
+      end
+    end
+    narrow()
+    c = key()
+  end
+  bits := btn(2) + btn(3) * 2 + btn(4) * 4
+  if bits & 4 == 4 and held & 4 == 0
+    start()
+  end
+  move := 0
+  if bits & 3 != held & 3
+    repeat = 12
+    move = (bits & 2) / 2 - (bits & 1)
+  else
+    if bits & 3 != 0
+      repeat -= 1
+      if repeat == 0
+        repeat = 4
+        move = (bits & 2) / 2 - (bits & 1)
+      end
+    end
+  end
+  if nshown > 0
+    pick = (pick + move + nshown) % nshown
+  end
+  held = bits
+end
+
+# a box with its corners a pixel in: softer than a plain rectangle
+pill :: proc(x: Int, y: Int, w: Int, h: Int, c: Int, under: Int)
+  rect(x, y, w, h, c)
+  pset(x, y, under)
+  pset(x + w - 1, y, under)
+  pset(x, y + h - 1, under)
+  pset(x + w - 1, y + h - 1, under)
+end
+
+draw* :: proc()
+  cls(1)
+  print("Rinc", 12, 12, 7)
+  rect(12, 21, 23, 1, 10) # (an accent under the name)
+  if count > 0
+    n: Blob[..16]
+    ok := n.format(count, " apps")
+    print(n[0:n.len()].asString(), 308 - n.len() * 6, 12, 13)
+  end
+  pill(8, 30, 304, 15, 0, 1)
+  if filter.len() == 0
+    print("Search", 14, 34, 5)
+  end
+  print(filter[0:filter.len()].asString(), 14, 34, 7)
+  rect(13 + filter.len() * 6, 33, 1, 8, 10)
+  top := max(0, pick - 12)
+  for row in 0..<min(nshown - top, 14)
+    i := top + row
+    y := 54 + row * 13
+    selected := i == pick
+    if selected
+      pill(8, y - 3, 304, 13, 12, 1)
+    end
+    k := shown[i]
+    dim := 13
+    if selected
+      dim = 6
+    end
+    if k < 0
+      print("Console", 16, y, 7)
+      print("rio, typed and run", 96, y, dim)
+    else
+      t := title(k)
+      print(t.asString(), 16, y, 7)
+      if titleLen[k] > 0
+        at := titleLen[k] + 1
+        for at < infoLen[k] and infos[infoAt[k] + at] == 32 # (the spaces after the colon)
+          at += 1
+        end
+        d := infos[infoAt[k] + at:infoAt[k] + min(infoLen[k], at + 35)]
+        print(d.asString(), 96, y, dim)
+      end
+    end
+  end
+  if nshown == 0
+    print("Nothing matches", 16, 54, 13)
+  end
+  if count == 0
+    print("No apps on the card yet: /rinc/apps", 12, 216, 13)
+  end
+  print("Enter opens   Esc clears   Windows key: home", 12, 228, 5)
+end

@@ -59,6 +59,62 @@ void rim_text_push(int c) {
   if (!((c >= 32 && c < 127) || c == 13 || c == 8) || next == ttail) return;
   typed[thead] = (uint8_t)c; thead = next;
 }
+/* apps, for the launcher (with storage): apps() -> Int looks again and says how many;
+   appName(i, out) -> Int and appInfo(i, out) -> Int copy app i's folder name, or its first line (its
+   comment marker left off: "Title: what it does"), into out, and say how long it is. launch(name) and
+   openConsole() ask the platform to switch, after this frame (rim_launch) */
+const RimFs *rim_fs;
+int rim_launch; char rim_launch_name[33];
+static char app_names[64][33]; static int napps;
+static void app_found(const char *name, int dir, void *ud) {
+  size_t n = strlen(name); (void)ud;
+  if (dir && name[0] != '.' && n < sizeof app_names[0] && napps < 64) memcpy(app_names[napps++], name, n + 1);
+}
+static int lower_cmp(const char *a, const char *b) {
+  for (;; a++, b++) {
+    int x = *a >= 'A' && *a <= 'Z' ? *a + 32 : *a, y = *b >= 'A' && *b <= 'Z' ? *b + 32 : *b;
+    if (x != y || !x) return x - y;
+  }
+}
+/* the apps on storage, in order of name (ignoring case): how many, or -1 without storage */
+static int find_apps(void) {
+  int i, j;
+  napps = 0;
+  if (!rim_fs || rim_fs->list("/rinc/apps", app_found, 0)) return -1;
+  for (i = 1; i < napps; i++) /* (a few dozen at most: insertion) */
+    for (j = i; j > 0 && lower_cmp(app_names[j - 1], app_names[j]) > 0; j--) {
+      char t[sizeof app_names[0]]; memcpy(t, app_names[j], sizeof t); memcpy(app_names[j], app_names[j - 1], sizeof t); memcpy(app_names[j - 1], t, sizeof t);
+    }
+  return napps;
+}
+static void h_apps(Rio *v, RioVal *a) { (void)v; a[0].i = find_apps() < 0 ? 0 : napps; }
+static int copy_out(Rio *v, RioVal *out, const char *s, int n) {
+  char *p = (char *)rio_ptr(v, out); int cap = (int)out[1].u;
+  if (p) memcpy(p, s, (size_t)(n < cap ? n : cap));
+  return n;
+}
+static void h_app_name(Rio *v, RioVal *a) {
+  a[0].i = a[0].u < (uint32_t)napps ? copy_out(v, a + 1, app_names[a[0].i], (int)strlen(app_names[a[0].i])) : 0;
+}
+static void h_app_info(Rio *v, RioVal *a) {
+  char path[96], line[128]; int n = 0, i = 0, k = a[0].i;
+  a[0].i = 0;
+  if (k < 0 || k >= napps || !rim_fs) return;
+  snprintf(path, sizeof path, "/rinc/apps/%s/%s.rio", app_names[k], app_names[k]);
+  if (rim_fs->open(path, 0)) return;
+  n = rim_fs->read(line, sizeof line);
+  rim_fs->close();
+  if (n <= 0 || line[0] != '#') return;
+  for (i = 1; i < n && line[i] == ' '; i++) {}
+  for (k = i; k < n && line[k] != '\n' && line[k] != '\r'; k++) {}
+  a[0].i = copy_out(v, a + 1, line + i, k - i);
+}
+static void h_launch(Rio *v, RioVal *a) {
+  const char *s = (const char *)rio_ptr(v, a); int n = (int)a[1].u;
+  if (!s || n < 1 || n >= (int)sizeof rim_launch_name) return;
+  memcpy(rim_launch_name, s, (size_t)n); rim_launch_name[n] = 0; rim_launch = 1;
+}
+static void h_open_console(Rio *v, RioVal *a) { (void)v; (void)a; rim_launch = 2; }
 static void h_key(Rio *v, RioVal *a) { (void)v; if (ttail == thead) a[0].i = -1; else { a[0].i = typed[ttail]; ttail = (ttail + 1) % (int)sizeof typed; } }
 static void h_btn(Rio *v, RioVal *a) { (void)v; a[0].i = a[0].u < 16 ? rim_buttons >> a[0].i & 1 : 0; }
 /* stick(i) -> Float: 0 the left stick's x, 1 its y, 2 and 3 the right one's; -1 to 1, + right and down,
@@ -100,7 +156,8 @@ int rim_start(Rio *vm, void *mem, uint32_t memsize, void (*put)(const char *s, i
   if (rio_ffi(vm, "cls", "i", h_cls) || rio_ffi(vm, "pset", "iii", h_pset) || rio_ffi(vm, "pget", "ii>i", h_pget) ||
       rio_ffi(vm, "rect", "iiiii", h_rect) || rio_ffi(vm, "print", "siii", h_print) || rio_ffi(vm, "btn", "i>i", h_btn) || rim_audio_procs(vm) || rio_ffi(vm, "time", ">f", h_time) ||
       rio_ffi(vm, "fromHex", "bs>i", h_fromhex) || rio_ffi(vm, "stick", "i>f", h_stick) || rio_ffi(vm, "trigger", "i>f", h_trigger) ||
-      rio_ffi(vm, "key", ">i", h_key)) return -1;
+      rio_ffi(vm, "key", ">i", h_key) || rio_ffi(vm, "apps", ">i", h_apps) || rio_ffi(vm, "appName", "ib>i", h_app_name) ||
+      rio_ffi(vm, "appInfo", "ib>i", h_app_info) || rio_ffi(vm, "launch", "s", h_launch) || rio_ffi(vm, "openConsole", "", h_open_console)) return -1;
   thead = ttail = tesc = 0;
   return 0;
 }
@@ -278,7 +335,6 @@ void rim_repl_stop(RimRepl *r, const char *why) {
 }
 
 /* the commands for apps on storage */
-const RimFs *rim_fs;
 static void say(RimRepl *r, const char *s) { r->put(s, (int)strlen(s)); }
 static int app_path(char *path, size_t cap, const char *name, int n) {
   int i;
@@ -286,23 +342,37 @@ static int app_path(char *path, size_t cap, const char *name, int n) {
   for (i = 0; i < n; i++) if (!(wordch(name[i]) || name[i] == '-')) return 0;
   return snprintf(path, cap, "/rinc/apps/%.*s/%.*s.rio", n, name, n, name) < (int)cap;
 }
-static void list_one(const char *name, int dir, void *ud) {
-  RimRepl *r = (RimRepl *)ud;
-  if (dir && name[0] != '.') { say(r, name); say(r, "  "); r->saved++; }
+
+/* source, fed in as if typed, into a fresh session: from storage (src NULL) or from memory */
+static int feed(RimRepl *r, const char *src, int len) {
+  char buf[256]; int got, i, echo = r->echo, at = 0;
+  if (r->restart && r->restart()) { say(r, "can't start a fresh session\r\n"); return -1; }
+  r->loading = 1; r->errors = 0; r->echo = 0; r->n = 0; r->line0 = r->cur = r->scr = 0; r->run = 0;
+  for (;;) {
+    if (src) { got = len - at < (int)sizeof buf ? len - at : (int)sizeof buf; memcpy(buf, src + at, (size_t)got); at += got; }
+    else got = rim_fs->read(buf, sizeof buf);
+    if (got <= 0) break;
+    for (i = 0; i < got; i++) rim_repl_char(r, buf[i] == '\n' ? '\r' : buf[i] == '\r' ? -1 : (unsigned char)buf[i]);
+  }
+  if (r->n) rim_repl_char(r, '\r'); /* (an unfinished last line) */
+  r->loading = 0; r->echo = echo; r->n = r->line0 = r->cur = r->scr = 0; r->run = 0;
+  return r->errors;
 }
 static void load(RimRepl *r, const char *name, int n, int run) {
-  char path[96], buf[256]; int got, i, echo = r->echo;
+  char path[96]; int errors;
   if (!app_path(path, sizeof path, name, n)) { say(r, "names are letters, digits, _ and -\r\n"); return; }
   if (!rim_fs || rim_fs->open(path, 0)) { say(r, rim_fs ? "can't open " : "no storage: "); say(r, path); say(r, "\r\n"); return; }
-  if (r->restart && r->restart()) { rim_fs->close(); say(r, "can't start a fresh session\r\n"); return; }
-  r->loading = 1; r->errors = 0; r->echo = 0; r->n = 0; r->line0 = r->cur = r->scr = 0;
-  while ((got = rim_fs->read(buf, sizeof buf)) > 0)
-    for (i = 0; i < got; i++) rim_repl_char(r, buf[i] == '\n' ? '\r' : buf[i] == '\r' ? -1 : (unsigned char)buf[i]);
-  if (r->n) rim_repl_char(r, '\r'); /* (an unfinished last line) */
+  errors = feed(r, 0, 0);
   rim_fs->close();
-  r->loading = 0; r->echo = echo; r->n = r->line0 = r->cur = r->scr = 0;
-  say(r, r->errors ? "loaded, with errors: " : "loaded "); say(r, path); say(r, "\r\n");
-  if (run && !r->errors) r->run = 1;
+  if (errors < 0) return;
+  say(r, errors ? "loaded, with errors: " : "loaded "); say(r, path); say(r, "\r\n");
+  if (run && !errors) r->run = 1;
+}
+int rim_repl_app(RimRepl *r, const char *name, int run) { load(r, name, (int)strlen(name), run); return r->run ? 0 : -1; }
+int rim_repl_source(RimRepl *r, const char *src, int len) {
+  int errors = feed(r, src, len);
+  if (!errors) r->run = 1;
+  return errors ? -1 : 0;
 }
 static void save_flush(RimRepl *r) { if (r->nout && rim_fs->write(r->out, r->nout) < 0) r->saving = -1; r->saved += r->nout; r->nout = 0; }
 static void save_char(RimRepl *r, int c) { /* while saving: everything typed goes to the file, until Ctrl-D */
@@ -336,13 +406,22 @@ static int command(RimRepl *r) {
   while (n && s[n - 1] == ' ') n--;
   while (n && *s == ' ') { s++; n--; }
   for (w = 0; w < n && s[w] != ' '; w++) {}
+  if (w == 4 && n == 4 && !memcmp(s, "home", 4)) { rim_launch = 3; return 1; } /* (the platform goes back to the launcher) */
   if (w == 2 && n == 2 && !memcmp(s, "ls", 2)) {
     if (!rim_fs) say(r, "no storage\r\n");
-    else { r->saved = 0; if (rim_fs->list("/rinc/apps", list_one, r)) say(r, "no apps (or no card): /rinc/apps\r\n"); else say(r, r->saved ? "\r\n" : "(none yet)\r\n"); }
+    else if (find_apps() < 0) say(r, "no apps (or no card): /rinc/apps\r\n");
+    else { int i; for (i = 0; i < napps; i++) { say(r, app_names[i]); say(r, "  "); } say(r, napps ? "\r\n" : "(none yet)\r\n"); }
     return 1;
   }
   if (n > w + 1 && ((w == 4 && !memcmp(s, "load", 4)) || (w == 3 && !memcmp(s, "run", 3)))) { load(r, s + w + 1, n - w - 1, w == 3); return 1; }
   if (n > w + 1 && w == 4 && !memcmp(s, "save", 4)) { save(r, s + w + 1, n - w - 1); return 1; }
+  if (n > w + 1 && w == 6 && !memcmp(s, "delete", 6)) {
+    char path[96]; const char *name = s + w + 1; int k = n - w - 1;
+    if (!app_path(path, sizeof path, name, k)) say(r, "names are letters, digits, _ and -\r\n");
+    else if (!rim_fs || rim_fs->remove(path)) { say(r, "can't delete "); say(r, path); say(r, "\r\n"); }
+    else { path[strlen(path) - (size_t)k - 5] = 0; rim_fs->remove(path); say(r, "deleted "); r->put(name, k); say(r, "\r\n"); } /* (then its folder, if empty) */
+    return 1;
+  }
   return 0;
 }
 

@@ -137,5 +137,6 @@ static int fs_list(const char *dir, void (*each)(const char *name, int dir, void
   f_closedir(&d);
   return 0;
 }
-static const RimFs sd_fs = {fs_open, fs_read, fs_write, fs_close, fs_list};
+static int fs_remove(const char *path) { if (open_) { f_close(&file); open_ = 0; } return mount() && f_unlink(path) == FR_OK ? 0 : -1; }
+static const RimFs sd_fs = {fs_open, fs_read, fs_write, fs_close, fs_list, fs_remove};
 void rim_sd_setup(void) { gpio_init(PIN_DETECT); gpio_pull_up(PIN_DETECT); rim_fs = &sd_fs; }

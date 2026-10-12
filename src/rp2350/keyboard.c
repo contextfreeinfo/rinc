@@ -53,6 +53,7 @@ static int character(uint8_t key, uint8_t mods) {
 static void report(const hid_keyboard_report_t *r) {
   int i, j;
   memset(rim_keys_down, 0, sizeof rim_keys_down);
+  rim_keys_down[0xE0 >> 3] = r->modifier; /* (the modifiers, Ctrl Shift Alt and GUI left then right, are keys 0xE0-0xE7: a byte of their own) */
   for (i = 0; i < 6; i++) {
     uint8_t k = r->keycode[i], was = 0;
     if (!k) continue;

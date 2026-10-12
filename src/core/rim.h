@@ -73,14 +73,21 @@ typedef struct {
   int (*write)(const char *buf, int n);
   int (*close)(void);
   int (*list)(const char *dir, void (*each)(const char *name, int dir, void *ud), void *ud);
+  int (*remove)(const char *path); /* a file, or an empty directory: 0 or -1 */
 } RimFs;
 extern const RimFs *rim_fs;
+/* a cart (the launcher) asked to switch: 1 to the app named rim_launch_name, 2 to the console; or the
+   console's home command, 3: back to the launcher. The platform does it (after the frame) and sets it
+   back to 0 */
+extern int rim_launch;
+extern char rim_launch_name[33];
 
 /* a REPL over any text stream: feed it characters, it echoes them and runs each complete input.
    Besides rio, it knows a few commands, each a line on its own: run (the game loop, for what's been
-   typed), and with storage: ls (the apps), load name (an app's source, as if typed, into a fresh
+   typed), home (back to the launcher, where there is one), and with storage: ls (the apps), load name (an app's source, as if typed, into a fresh
    session: restart gives one), run name (load, then run), save name (what's typed next, until
-   Ctrl-D, becomes the app's source; Ctrl-C gives up) */
+   Ctrl-D, becomes the app's source; Ctrl-C gives up), delete name (its source and folder, if that's
+   all the folder holds) */
 typedef struct {
   Rio *vm;
   void (*put)(const char *s, int n);
@@ -98,5 +105,9 @@ typedef struct {
 int rim_repl_begin(RimRepl *r, Rio *vm, void *scratch, uint32_t size);
 void rim_repl_stop(RimRepl *r, const char *why); /* the game loop ended (why: NULL, or a message) */
 void rim_repl_char(RimRepl *r, int c);
+/* a fresh session with an app from storage, or with source from memory (the launcher), running:
+   0, or -1 (what went wrong is said) */
+int rim_repl_app(RimRepl *r, const char *name, int run);
+int rim_repl_source(RimRepl *r, const char *src, int len);
 
 #endif

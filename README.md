@@ -40,6 +40,8 @@ Carts draw into one 320x240 screen of 8-bit palette indexes, through host procs:
 | `stick(i) -> Float` | a controller's sticks: 0 left x, 1 left y, 2 right x, 3 right y; -1 to 1, + right and down, 0 near the middle |
 | `trigger(i) -> Float` | its triggers: 0 left, 1 right; 0 to 1 |
 | `time() -> Float` | seconds since start |
+| `apps() -> Int`, `appName(i, out) -> Int`, `appInfo(i, out) -> Int` | the apps on the SD card (sorted): how many, and app i's folder name or first line, into a Blob (how long) |
+| `launch(name)`, `openConsole()` | switch to an app, or the console, after this frame |
 | `fromHex(out, text) -> Int` | bytes from hex digits into a Blob (anything else in the text is skipped), until it's full: how many. For data typed into a cart |
 
 The palette is the PICO-8 16 colors, then a 6x6x6 color cube, then 24 grays.
@@ -85,18 +87,27 @@ python -m serial.tools.miniterm COM3 115200 --eol CR   # pip install pyserial; C
 
 A keyboard's volume knob or keys set the system volume (both outputs, in 2.5 dB steps; mute too).
 
+**The launcher.** The board starts in the launcher (`system/launcher.rio`, a cart built into the
+firmware): the apps on the SD card, sorted, each with the title and description from its first line
+(`# Bounce: the arrow keys tilt gravity...`), and the console (the REPL). Type to narrow the list, up
+and down (or the d-pad) to choose, Enter (or A) to start. The Windows key, or a controller's Xbox
+button, comes back to it from anywhere, as Esc does for now (apps will get Esc later); Ctrl-C stops
+what's running and drops into the console, with it still loaded.
+
 **Apps on the SD card.** A FAT32 card in the slot holds apps, each in its own folder named for it, its
-source named the same way (as rio's modules are): `/rinc/apps/chord/chord.rio`. At the REPL:
+source named the same way (as rio's modules are): `/rinc/apps/chord/chord.rio`. In the console:
 
 ```
 ls              the apps on the card
 run chord       load it into a fresh session, and start it
 load chord      just load it (its procs and globals are there to use)
 save chord      what's typed or pasted next, until Ctrl-D, becomes the app (Ctrl-C gives up)
+delete chord    its source, and its folder if that's all there was
+home            back to the launcher
 ```
 
 `uv run tools/send.py carts/*.rio --save` puts carts on the card over USB serial; a card reader works
-too. (A first version: a launcher apart from the REPL comes next.)
+too.
 
 The REPL edits the line being typed (left and right, Home and End or Ctrl-A and Ctrl-E, Backspace and
 Delete; up and down go back through earlier lines), colors it (keywords, constants, comments),

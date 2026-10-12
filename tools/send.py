@@ -7,7 +7,8 @@
   uv run tools/send.py carts/bounce.rio [COM3] --save         to /rinc/apps/bounce/bounce.rio
   uv run tools/send.py carts/*.rio --save                     several at once
 
-Esc (or Ctrl-C) stops a running game first, so this also replaces one that's playing. Prints what the
+Ctrl-C stops whatever's running first and drops into the console (the board starts in the launcher), so
+this also replaces a game that's playing. Prints what the
 board says back: errors show up with their lines. A saved app runs with `run bounce` at the REPL.
 """
 import glob, os, sys, time
@@ -30,7 +31,7 @@ def talk(s, data):
 
 with serial.Serial(port, 115200, timeout=0.2) as s:
   s.dtr = True
-  s.write(b'\x1b')                      # stop a game that's running, if any
+  s.write(b'\x03')                      # stop what's running (the launcher, a game), into the console
   time.sleep(0.2); s.reset_input_buffer()
   for cart in carts:
     src = open(cart, encoding='utf-8').read().replace('\r\n', '\n')
