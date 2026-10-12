@@ -1,0 +1,66 @@
+# The carts as web pages, on GitHub Pages: each push to main builds the web player and a headless rim,
+# makes a page of each cart (rim -web), and an index linking them, from each cart's first comment line.
+name: pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+      - name: Build the web player and a headless rim
+        run: |
+          python3 tools/web.py --wasm=rim.wasm
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DRIM_PLATFORM=desktop -DRIM_SDL=OFF -DRIM_WEB_WASM=rim.wasm
+          cmake --build build --parallel
+      - name: Make the pages
+        run: |
+          mkdir -p site
+          {
+            echo '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+            echo '<meta name="viewport" content="width=device-width, initial-scale=1"><title>Rinc carts</title>'
+            echo '<style>body{margin:0;padding:24px 16px;background:#1d2b53;color:#fff1e8;font:16px/1.5 ui-monospace,monospace}'
+            echo 'main{max-width:720px;margin:auto}a{color:#ffec27}h1{font-size:22px}li{margin:10px 0}p{color:#c2c3c7}</style>'
+            echo '</head><body><main><h1>Rinc carts</h1>'
+            echo '<p>Rinc carts, playing in the browser: the same rio VM as on the board and the desktop. Arrows and V C X Z, or a controller.</p><ul>'
+            for cart in carts/*.rio; do
+              name=$(basename "$cart" .rio)
+              case $name in bench|micro) continue;; esac # (timings, not demos)
+              build/rim "$cart" -web "site/$name.html"
+              about=$(head -1 "$cart" | sed -e 's/^# *//' -e 's/&/\&amp;/g' -e 's/</\&lt;/g')
+              echo "<li><a href=\"$name.html\">$name</a>: $about</li>"
+            done
+            echo '</ul><p><a href="https://github.com/contextfreeinfo/rinc">Source</a></p></main></body></html>'
+          } > site/index.html
+          ls -l site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -34,9 +34,10 @@ static void put(const char *s, int n) { fwrite(s, 1, (size_t)n, stdout); fflush(
 /* a game: a frame at each vertical blank, right after the screen was copied for showing */
 static void game_frame(void) {
   static uint32_t last; int res;
-  while (rim_frames == last) rim_keyboard_char(); /* (keeps the USB host going; typing waits) */
+  while (rim_frames == last) { int c = rim_keyboard_char(); if (c >= 0 && c != 27) rim_text_push(c); } /* (typing goes to key()) */
   last = rim_frames;
-  if (DOWN(HID_KEY_ESCAPE) || (res = getchar_timeout_us(0)) == 27 || res == 3) { /* Esc, on the keyboard or over serial (or Ctrl-C) */
+  while ((res = getchar_timeout_us(0)) != PICO_ERROR_TIMEOUT && res != 27 && res != 3) rim_text_push(res); /* (serial typing too) */
+  if (DOWN(HID_KEY_ESCAPE) || res == 27 || res == 3) { /* Esc, on the keyboard or over serial (or Ctrl-C) */
     rim_console_put("\r\n", 2); rim_repl_stop(&repl, "stopped"); return;
   }
   rim_pad_read();

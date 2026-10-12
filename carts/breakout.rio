@@ -1,4 +1,4 @@
-# Breakout: the arrow keys move the paddle, Z or X serves. Clear every brick.
+# Breakout: the arrow keys (or a stick) move the paddle, V or C serves. Clear every brick.
 COLS :: 10
 ROWS :: 6
 PADW :: 40

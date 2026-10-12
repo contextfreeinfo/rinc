@@ -78,7 +78,11 @@ canvas { position: absolute; inset: 0; margin: auto; image-rendering: pixelated;
     ex.axes(s(p.axes[0]), s(p.axes[1]), s(p.axes[2]), s(p.axes[3]), s(p.buttons[6] && p.buttons[6].value), s(p.buttons[7] && p.buttons[7].value));
     return b;
   };
-  addEventListener("keydown", e => { if (keys[e.code]) { buttons |= keys[e.code]; e.preventDefault(); } });
+  addEventListener("keydown", e => {
+    if (keys[e.code]) { buttons |= keys[e.code]; e.preventDefault(); }
+    const c = e.key.length === 1 ? e.key.charCodeAt(0) : e.key === "Enter" ? 13 : e.key === "Backspace" ? 8 : 0; // key(): typing
+    if (c && c < 127 && !e.ctrlKey && !e.metaKey) { ex.typed(c); if (c === 8) e.preventDefault(); }
+  });
   addEventListener("keyup", e => { if (keys[e.code]) buttons &= ~keys[e.code]; });
   addEventListener("blur", () => { buttons = 0; });
   const tick = now => {

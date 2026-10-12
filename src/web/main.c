@@ -32,6 +32,7 @@ EXPORT(start) int start(int len) {
 /* a frame with these buttons held: 0, 1 (not a game), -1 (error) */
 EXPORT(frame) int frame(int buttons) { rim_buttons = (uint16_t)buttons; return rim_frame(&vm); }
 EXPORT(error) const char *error(void) { return rio_error(&vm); }
+EXPORT(typed) void typed(int c) { rim_text_push(c); } /* a character typed, for key() */
 /* a controller's sticks and triggers, before a frame (as in rim_axes) */
 EXPORT(axes) void axes(int lx, int ly, int rx, int ry, int lt, int rt) {
   rim_axes[0] = (int16_t)lx; rim_axes[1] = (int16_t)ly; rim_axes[2] = (int16_t)rx; rim_axes[3] = (int16_t)ry; rim_axes[4] = (int16_t)lt; rim_axes[5] = (int16_t)rt;

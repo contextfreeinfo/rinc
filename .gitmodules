@@ -1,7 +1,7 @@
 [submodule "lib/rio"]
 	path = lib/rio
 	url = https://github.com/contextfreeinfo/rio.git
-	branch = vibe
+	branch = main
 [submodule "lib/Pico-PIO-USB"]
 	path = lib/Pico-PIO-USB
 	url = https://github.com/sekigon-gonnoc/Pico-PIO-USB.git

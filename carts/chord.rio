@@ -1,3 +1,9 @@
+# Chord: a plucked chord in 4-bit ADPCM (5.6 KB), typed in as hex, and the same chord as 16-bit
+# (22 KB) and 8-bit (11 KB), made here, to hear the difference. V plays the ADPCM one, C the 16-bit
+# one, X the 8-bit one (each on the next of the 8 voices, so they overlap); left and right change
+# the pitch, up and down the pan. Measured on this chord: ADPCM and 8-bit both 36 dB signal to noise, but in the quiet
+# tail ADPCM 40 dB and 8-bit 28 (8-bit's noise stays put as the sound fades; ADPCM's shrinks with it).
+# ADPCM at 22 kHz is its grainy end: it gets better with the rate, about 9 dB each time it doubles.
 # chord: 11026 frames of mono IMA ADPCM at 22050 a second (5590 bytes; tools/adpcm.py made this)
 chord: Blob[5590]
 chord_n := 0
@@ -127,13 +133,6 @@ cbcbbaaa9800121290ebdccbcbaa89214644533224220190b9bdbddbbabbcbbababbbaab9a316554
 98bcdcbbbcbbacbbbabbadacbcbbbcba9a0842453405
 ")
 # play it: sound(0, chord, 4, 1, 22050.0)
-
-# Chord: a plucked chord in 4-bit ADPCM (5.6 KB), typed in as hex, and the same chord as 16-bit
-# (22 KB) and 8-bit (11 KB), made here, to hear the difference. V plays the ADPCM one, C the 16-bit
-# one, X the 8-bit one (each on the next of the 8 voices, so they overlap); left and right change
-# the pitch, up and down the pan. Measured on this chord: ADPCM and 8-bit both 36 dB signal to noise, but in the quiet
-# tail ADPCM 40 dB and 8-bit 28 (8-bit's noise stays put as the sound fades; ADPCM's shrinks with it).
-# ADPCM at 22 kHz is its grainy end: it gets better with the rate, about 9 dB each time it doubles.
 fine: [11025]Float
 pluck :: proc(f: Float, start: Int)
   for i in start..<11025

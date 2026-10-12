@@ -225,6 +225,7 @@ static int window(const char *title) {
   if (!SDL_CreateWindowAndRenderer(title, RIM_W * 2, RIM_H * 2, SDL_WINDOW_RESIZABLE, &w, &r)) { fprintf(stderr, "rim: %s\n", SDL_GetError()); return 1; }
   SDL_SetRenderLogicalPresentation(r, RIM_W, RIM_H, SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
   SDL_SetRenderVSync(r, 1);
+  SDL_StartTextInput(w);
   tex = SDL_CreateTexture(r, SDL_PIXELFORMAT_RGB565, SDL_TEXTUREACCESS_STREAMING, RIM_W, RIM_H);
   SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_NEAREST);
   rim_time = sdl_now;
@@ -233,6 +234,9 @@ static int window(const char *title) {
     SDL_Event e; const bool *k; uint16_t *px; int pitch, x, y;
     while (SDL_PollEvent(&e)) {
       if (e.type == SDL_EVENT_QUIT || (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE)) running = 0;
+      if (e.type == SDL_EVENT_TEXT_INPUT) { const char *t = e.text.text; while (*t) rim_text_push((unsigned char)*t++); } /* (key(): typing) */
+      if (e.type == SDL_EVENT_KEY_DOWN && (e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER)) rim_text_push(13);
+      if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_BACKSPACE) rim_text_push(8);
       if (e.type == SDL_EVENT_GAMEPAD_ADDED && !pad) pad = SDL_OpenGamepad(e.gdevice.which);
       if (e.type == SDL_EVENT_GAMEPAD_REMOVED && pad && SDL_GetGamepadID(pad) == e.gdevice.which) { SDL_CloseGamepad(pad); pad = 0; }
     }

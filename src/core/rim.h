@@ -20,6 +20,9 @@ extern uint16_t rim_buttons;
 /* a controller's sticks and triggers, also set by the platform: 0 left stick x, 1 its y, 2 and 3 the
    right stick's (-32767 to 32767; y is + down, as on the screen), 4 left trigger, 5 right (0 to 32767) */
 extern int16_t rim_axes[6];
+/* typed text, for a cart's key(): the platform passes each character typed while a cart runs
+   (printable ASCII, 13 Enter, 8 Backspace; terminal escapes are skipped) */
+void rim_text_push(int c);
 enum { RIM_LEFT = 1, RIM_RIGHT = 2, RIM_UP = 4, RIM_DOWN = 8, RIM_A = 16, RIM_B = 32, RIM_X = 64, RIM_Y = 128,
        RIM_LB = 256, RIM_RB = 512, RIM_LS = 1024, RIM_RS = 2048, RIM_START = 4096, RIM_BACK = 8192 };
 
@@ -68,6 +71,10 @@ typedef struct {
   int n, line0; /* acc holds the unfinished input; the current line starts at line0 */
   int echo;      /* echo typed characters (serial terminals don't; a desktop terminal already did) */
   int run;       /* the line "run" asks for the game loop: the platform runs frames while it's set */
+  /* editing: the cursor (in acc), where the screen's cursor is (from line0), a key's escape sequence
+     arriving, the color state at the line's end (mode, and where its unfinished word starts) */
+  int cur, scr, esc, escn, mode, word; const char *wp; /* wp: the unfinished word's color now */
+  char hist[1024], draft[256]; int hlen, back, draftn; /* lines typed before, and the one being typed */
 } RimRepl;
 int rim_repl_begin(RimRepl *r, Rio *vm, void *scratch, uint32_t size);
 void rim_repl_stop(RimRepl *r, const char *why); /* the game loop ended (why: NULL, or a message) */

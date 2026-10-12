@@ -27,6 +27,14 @@ static void push(int c) {
   unsigned next = (qhead + 1) % sizeof queue;
   if (next != qtail) { queue[qhead] = (char)c; qhead = next; }
 }
+/* editing keys, as a terminal sends them: ESC [ and a letter (arrows, Home, End) or 3~ (Delete) */
+static int editing(uint8_t key) {
+  const char *seq = key == HID_KEY_ARROW_UP ? "A" : key == HID_KEY_ARROW_DOWN ? "B" : key == HID_KEY_ARROW_RIGHT ? "C" :
+    key == HID_KEY_ARROW_LEFT ? "D" : key == HID_KEY_HOME ? "H" : key == HID_KEY_END ? "F" : key == HID_KEY_DELETE ? "3~" : 0;
+  if (!seq) return 0;
+  push(27); push('['); while (*seq) push(*seq++);
+  return 1;
+}
 /* a key press as a character: ASCII, Enter as \r, Backspace as 8, Ctrl+letter as its control code */
 static int character(uint8_t key, uint8_t mods) {
   int shift = mods & (KEYBOARD_MODIFIER_LEFTSHIFT | KEYBOARD_MODIFIER_RIGHTSHIFT), c;
@@ -51,7 +59,7 @@ static void report(const hid_keyboard_report_t *r) {
     rim_keys_down[k >> 3] |= (uint8_t)(1u << (k & 7));
     for (j = 0; j < 6; j++) if (last.keycode[j] == k) was = 1;
     if (!was) { /* newly pressed: type it, and repeat it if held */
-      int c = character(k, r->modifier);
+      int c = editing(k) ? -1 : character(k, r->modifier);
       if (c >= 0) push(c);
       repeat_key = k; repeat_mods = r->modifier; repeat_at = time_us_64() + REPEAT_DELAY_US;
     }
@@ -149,7 +157,7 @@ int rim_keyboard_char(void) {
   int c;
   tuh_task(); rim_pad_task();
   if (repeat_key && time_us_64() >= repeat_at) {
-    int r = character(repeat_key, repeat_mods);
+    int r = editing(repeat_key) ? -1 : character(repeat_key, repeat_mods);
     if (r >= 0) push(r);
     repeat_at = time_us_64() + REPEAT_EVERY_US;
   }
