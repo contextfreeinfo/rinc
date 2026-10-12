@@ -47,8 +47,8 @@ static void h_print(Rio *v, RioVal *a) { /* print(s, x, y, c): text at pixel x, 
   if (!s) return;
   for (i = 0; i < a[1].i; i++, x += 6) rim_char((unsigned char)s[i], x, y, a[4].i & 255, -1);
 }
-/* key() -> Int: the next character typed (32-126, 13 Enter, 8 Backspace), or -1 when there's none
-   waiting. The keys also press buttons as they're held: a cart reads whichever it wants */
+/* key() -> Int: the next character typed (32-126, 13 Enter, 8 Backspace, 27 Esc), or -1 when there's
+   none waiting. The keys also press buttons as they're held: a cart reads whichever it wants */
 static uint8_t typed[64]; static int thead, ttail, tesc;
 void rim_text_push(int c) {
   int next = (thead + 1) % (int)sizeof typed;
@@ -115,6 +115,7 @@ static void h_launch(Rio *v, RioVal *a) {
   memcpy(rim_launch_name, s, (size_t)n); rim_launch_name[n] = 0; rim_launch = 1;
 }
 static void h_open_console(Rio *v, RioVal *a) { (void)v; (void)a; rim_launch = 2; }
+void rim_text_esc(void) { int next = (thead + 1) % (int)sizeof typed; if (next != ttail) { typed[thead] = 27; thead = next; } }
 static void h_key(Rio *v, RioVal *a) { (void)v; if (ttail == thead) a[0].i = -1; else { a[0].i = typed[ttail]; ttail = (ttail + 1) % (int)sizeof typed; } }
 static void h_btn(Rio *v, RioVal *a) { (void)v; a[0].i = a[0].u < 16 ? rim_buttons >> a[0].i & 1 : 0; }
 /* stick(i) -> Float: 0 the left stick's x, 1 its y, 2 and 3 the right one's; -1 to 1, + right and down,
@@ -212,7 +213,7 @@ static void move_left(RimRepl *r, int k) { char b[16]; if (k > 0) r->put(b, snpr
 static void paint_line(RimRepl *r) {
   int i = r->line0, j;
   puts_(r, PAINT_PLAIN); /* (from whatever color the cursor was last in: a comment's, say) */
-  r->mode = rio_repl_indent(r->acc, (uint32_t)r->line0) < 0 ? MODE_STRING : MODE_PLAIN; r->word = -1;
+  r->mode = rio_repl_indent(r->acc, (uint32_t)r->line0) < 0 ? MODE_STRING : MODE_PLAIN; r->word = -1; r->numdot = -1;
   if (r->mode == MODE_STRING) puts_(r, PAINT_STRING);
   while (i < r->n) {
     char c = r->acc[i];
@@ -224,10 +225,12 @@ static void paint_line(RimRepl *r) {
     else if (c == '"') { puts_(r, PAINT_STRING); r->put(&c, 1); r->mode = MODE_STRING; i++; }
     else if (wordch(c)) {
       const char *p;
-      for (j = i; j < r->n && (wordch(r->acc[j]) || (r->acc[i] >= '0' && r->acc[i] <= '9' && r->acc[j] == '.')); j++) {}
+      int dot = 0; /* (a number's one dot, if a digit follows it: 1.5, but 0..<n) */
+      for (j = i; j < r->n && (wordch(r->acc[j]) || (r->acc[i] >= '0' && r->acc[i] <= '9' && r->acc[j] == '.' && !dot++ &&
+                               j + 1 < r->n && r->acc[j + 1] >= '0' && r->acc[j + 1] <= '9')); j++) {}
       if ((p = word_paint(r->acc + i, j - i))) { puts_(r, p); r->put(r->acc + i, j - i); puts_(r, PAINT_PLAIN); }
       else r->put(r->acc + i, j - i);
-      if (j == r->n) { r->word = i; r->wp = p; } /* (the last word: still being typed) */
+      if (j == r->n) { r->word = i; r->wp = p; r->numdot = -1; } /* (the last word: still being typed) */
       i = j;
     } else { r->put(&c, 1); i++; }
   }
@@ -240,7 +243,8 @@ static void redraw(RimRepl *r) {
   move_left(r, r->n - r->cur); r->scr = r->cur - r->line0;
 }
 /* the word at the end of the line ended (it's already in its color) */
-static void finish_word(RimRepl *r) { r->word = -1; r->wp = 0; }
+static void finish_word(RimRepl *r) { r->word = -1; r->wp = 0; r->numdot = -1; }
+static void append_tail(RimRepl *r, char c);
 /* c typed at the end of the line */
 static void append(RimRepl *r, char c) {
   r->acc[r->n++] = c; r->cur = r->n;
@@ -252,8 +256,12 @@ static void append(RimRepl *r, char c) {
     for (i = r->n - 2; i >= r->line0 && r->acc[i] == '\\'; i--) k++;
     r->put(&c, 1);
     if (c == '"' && !(k & 1)) { puts_(r, PAINT_PLAIN); r->mode = MODE_PLAIN; }
-  } else if (wordch(c) || (c == '.' && r->word >= 0 && r->acc[r->word] >= '0' && r->acc[r->word] <= '9')) {
+  } else if (r->numdot >= 0 && r->numdot == r->n - 2 && !(c >= '0' && c <= '9')) { /* (a number's dot, but no digit after: not its dot) */
+    move_left(r, 1); puts_(r, PAINT_PLAIN "."); finish_word(r);
+    r->n--; append_tail(r, c);
+  } else if (wordch(c) || (c == '.' && r->word >= 0 && r->acc[r->word] >= '0' && r->acc[r->word] <= '9' && r->numdot < r->word)) {
     const char *p;
+    if (c == '.') r->numdot = r->n - 1; /* (for now: if a digit comes next, it's the number's) */
     if (r->word < 0) { r->word = r->n - 1; r->wp = 0; }
     p = word_paint(r->acc + r->word, r->n - r->word);
     if (p != r->wp) { /* (its color changed: the whole word again) */
@@ -271,9 +279,13 @@ static void append(RimRepl *r, char c) {
     r->put(&c, 1);
   }
 }
+static void append_tail(RimRepl *r, char c) { append(r, c); } /* (append again, after taking back a dot) */
+/* the next line's indent, two spaces a step. Spaces typed at its start take its place first (so
+   typed or pasted indenting doesn't double it) */
 static void indent(RimRepl *r) {
   int k = rio_repl_indent(r->acc, (uint32_t)r->n) * 2;
-  while (k-- > 0 && r->n < (int)sizeof r->acc - 2) append(r, ' ');
+  r->autoind = 0;
+  while (k-- > 0 && r->n < (int)sizeof r->acc - 2) { append(r, ' '); r->autoind++; }
 }
 /* the line so far is its indent and one word: end, else or case go a step out */
 static void outdent(RimRepl *r) {
@@ -320,7 +332,7 @@ static void recall(RimRepl *r, int dir) { /* dir 1: older, -1: newer */
 
 int rim_repl_begin(RimRepl *r, Rio *vm, void *scratch, uint32_t size) {
   memset(r, 0, sizeof *r);
-  r->vm = vm; r->put = rim_put; r->echo = 1; r->word = -1;
+  r->vm = vm; r->put = rim_put; r->echo = 1; r->word = -1; r->numdot = -1;
   if (rio_repl_begin(vm, scratch, size, 0)) return -1;
   r->put("Rim: rio REPL\r\n", 15);
   prompt(r);
@@ -348,6 +360,7 @@ static int feed(RimRepl *r, const char *src, int len) {
   char buf[256]; int got, i, echo = r->echo, at = 0;
   if (r->restart && r->restart()) { say(r, "can't start a fresh session\r\n"); return -1; }
   r->loading = 1; r->errors = 0; r->echo = 0; r->n = 0; r->line0 = r->cur = r->scr = 0; r->run = 0;
+  r->esc = 0; r->saving = 0; /* (nothing half typed carries over: an Esc that began a key's escape, say) */
   for (;;) {
     if (src) { got = len - at < (int)sizeof buf ? len - at : (int)sizeof buf; memcpy(buf, src + at, (size_t)got); at += got; }
     else got = rim_fs->read(buf, sizeof buf);
@@ -425,7 +438,7 @@ static int command(RimRepl *r) {
   return 0;
 }
 
-static void new_line(RimRepl *r) { r->line0 = r->n; r->cur = r->n; r->scr = 0; r->mode = MODE_PLAIN; r->word = -1; r->back = 0; }
+static void new_line(RimRepl *r) { r->line0 = r->n; r->cur = r->n; r->scr = 0; r->mode = MODE_PLAIN; r->word = -1; r->numdot = -1; r->back = 0; r->autoind = 0; }
 static void key(RimRepl *r, int k) { /* an editing key: A up, B down, C right, D left, H home, F end, 3 delete */
   if (k == 'A' || k == 'B') { recall(r, k == 'A' ? 1 : -1); return; }
   if (k == 'C' && r->cur < r->n) r->cur++;
@@ -470,6 +483,7 @@ void rim_repl_char(RimRepl *r, int c) {
     r->n = 0; new_line(r);
     prompt(r);
   } else if (c == 8 || c == 127) { /* backspace (in the indent, a step) */
+    r->autoind = 0;
     if (r->cur == r->n) {
       int k = r->n > r->line0 && blank(r) && r->n - r->line0 >= 2 ? 2 - (r->n - r->line0) % 2 : 1;
       while (k-- > 0 && r->n > r->line0) r->n--;
@@ -481,6 +495,8 @@ void rim_repl_char(RimRepl *r, int c) {
   else if (c == 3) { /* Ctrl-C: drop what's typed */
     r->put(PAINT_PLAIN "^C\r\n", 8); r->n = 0; new_line(r); prompt(r);
   } else if (c >= 32 && c < 127 && r->n < (int)sizeof r->acc - 2) {
+    if (c == ' ' && r->autoind > 0 && r->cur == r->n && blank(r)) { r->autoind--; return; } /* (in place of the auto indent) */
+    if (c != ' ') r->autoind = 0;
     if (c == ' ') outdent(r);
     if (r->cur == r->n) append(r, (char)c);
     else { memmove(r->acc + r->cur + 1, r->acc + r->cur, (size_t)(r->n - r->cur)); r->acc[r->cur++] = (char)c; r->n++; redraw(r); }

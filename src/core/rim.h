@@ -23,6 +23,7 @@ extern int16_t rim_axes[6];
 /* typed text, for a cart's key(): the platform passes each character typed while a cart runs
    (printable ASCII, 13 Enter, 8 Backspace; terminal escapes are skipped) */
 void rim_text_push(int c);
+void rim_text_esc(void); /* the Esc key itself, for key() (the platform knows it from a terminal escape) */
 enum { RIM_LEFT = 1, RIM_RIGHT = 2, RIM_UP = 4, RIM_DOWN = 8, RIM_A = 16, RIM_B = 32, RIM_X = 64, RIM_Y = 128,
        RIM_LB = 256, RIM_RB = 512, RIM_LS = 1024, RIM_RS = 2048, RIM_START = 4096, RIM_BACK = 8192 };
 
@@ -97,7 +98,8 @@ typedef struct {
   int run;       /* the line "run" asks for the game loop: the platform runs frames while it's set */
   /* editing: the cursor (in acc), where the screen's cursor is (from line0), a key's escape sequence
      arriving, the color state at the line's end (mode, and where its unfinished word starts) */
-  int cur, scr, esc, escn, mode, word; const char *wp; /* wp: the unfinished word's color now */
+  int cur, scr, esc, escn, mode, word, numdot; const char *wp; /* wp: the unfinished word's color now; numdot: a number's dot, for now */
+  int autoind; /* spaces of the current line's auto indent that typed spaces can still take the place of */
   char hist[1024], draft[256]; int hlen, back, draftn; /* lines typed before, and the one being typed */
   int (*restart)(void); /* a fresh rio session, for load (0: done) */
   int loading, errors, saving, saved, cr; char out[256]; int nout; /* load and save as they go */

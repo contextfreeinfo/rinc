@@ -206,5 +206,5 @@ draw* :: proc()
   if count == 0
     print("No apps on the card yet: /rinc/apps", 12, 216, 13)
   end
-  print("Enter opens   Esc clears   Windows key: home", 12, 228, 5)
+  print("Enter opens   Esc clears", 12, 228, 5)
 end

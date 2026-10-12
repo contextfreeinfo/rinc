@@ -36,7 +36,7 @@ Carts draw into one 320x240 screen of 8-bit palette indexes, through host procs:
 | `rect(x, y, w, h, c)` | a filled rectangle |
 | `print(s, x, y, c)` | text, in the 5x8 font, 6 pixels a character |
 | `btn(i) -> Int` | 1 while button i is held: 0 left, 1 right, 2 up, 3 down (arrows), then the face buttons, most important first and named as on an Xbox controller: 4 A (V key), 5 B (C), 6 X (X), 7 Y (Z); then a controller's 8 LB, 9 RB, 10 and 11 the sticks pressed in, 12 Start, 13 Back |
-| `key() -> Int` | the next character typed (32-126, 13 Enter, 8 Backspace), or -1: for text. Held keys also press buttons, so a cart reads whichever suits it |
+| `key() -> Int` | the next character typed (32-126, 13 Enter, 8 Backspace, 27 Esc), or -1: for text. Held keys also press buttons, so a cart reads whichever suits it |
 | `stick(i) -> Float` | a controller's sticks: 0 left x, 1 left y, 2 right x, 3 right y; -1 to 1, + right and down, 0 near the middle |
 | `trigger(i) -> Float` | its triggers: 0 left, 1 right; 0 to 1 |
 | `time() -> Float` | seconds since start |
@@ -91,8 +91,9 @@ A keyboard's volume knob or keys set the system volume (both outputs, in 2.5 dB 
 firmware): the apps on the SD card, sorted, each with the title and description from its first line
 (`# Bounce: the arrow keys tilt gravity...`), and the console (the REPL). Type to narrow the list, up
 and down (or the d-pad) to choose, Enter (or A) to start. The Windows key, or a controller's Xbox
-button, comes back to it from anywhere, as Esc does for now (apps will get Esc later); Ctrl-C stops
-what's running and drops into the console, with it still loaded.
+button, comes back to it from anywhere: it's the one system key. Esc and Ctrl+C belong to apps (`key()`
+gives 27 for Esc). Over the USB serial port (not the keyboard), Ctrl-C stops what's running and drops
+into the console with it still loaded, for tools such as `send.py`.
 
 **Apps on the SD card.** A FAT32 card in the slot holds apps, each in its own folder named for it, its
 source named the same way (as rio's modules are): `/rinc/apps/chord/chord.rio`. In the console:

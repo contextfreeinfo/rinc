@@ -46,20 +46,24 @@ static int system_key(void) { /* the Windows key, or a controller's Xbox button:
 }
 /* a game: a frame at each vertical blank, right after the screen was copied for showing */
 static void game_frame(void) {
-  static uint32_t last; int res, stop = 0;
+  static uint32_t last; int res;
   while (rim_frames == last) { /* (typing goes to key(); editing keys, sent as ESC [ ..., are buttons instead) */
     int c = rim_keyboard_char();
-    if (c == 27) { do c = rim_keyboard_char(); while (c >= 0 && !((c >= 'A' && c <= 'Z') || c == '~')); continue; }
-    if (c == 3) stop = 1; /* (Ctrl+C) */
-    else if (c >= 0) rim_text_push(c);
+    if (c == 27) { /* (Esc itself, for the app; or the start of an editing key's escape, which isn't typing) */
+      c = rim_keyboard_char();
+      if (c != '[') { rim_text_esc(); if (c >= 0) rim_text_push(c); continue; }
+      do c = rim_keyboard_char(); while (c >= 0 && !((c >= 'A' && c <= 'Z') || c == '~'));
+      continue;
+    }
+    if (c >= 0) rim_text_push(c); /* (Ctrl+C is the app's too: copy, someday) */
   }
   last = rim_frames;
-  while ((res = getchar_timeout_us(0)) != PICO_ERROR_TIMEOUT && res != 27 && res != 3) rim_text_push(res); /* (serial typing too) */
+  while ((res = getchar_timeout_us(0)) != PICO_ERROR_TIMEOUT && res != 3) rim_text_push(res); /* (serial typing too) */
   rim_pad_read();
-  if (stop || res == 3) { /* Ctrl-C, on the keyboard or over serial: stop, into the console, with what was running still there */
+  if (res == 3) { /* Ctrl-C over serial (a developer's tools, such as send.py; not the keyboard's): stop, into the console, with what was running still there */
     rim_audio_reset(); rim_console_clear(1); rim_repl_stop(&repl, "stopped"); return;
   }
-  if (system_key() || DOWN(HID_KEY_ESCAPE) || res == 27) { /* home: the system key, or (for now) Esc, on the keyboard or over serial */
+  if (system_key()) { /* home: the Windows key, or a controller's Xbox button (Esc is the app's) */ /* home: the system key, or (for now) Esc, on the keyboard or over serial */
     home(); return;
   }
   rim_buttons = rim_pad_buttons | (uint16_t)(DOWN(HID_KEY_ARROW_LEFT) * RIM_LEFT | DOWN(HID_KEY_ARROW_RIGHT) * RIM_RIGHT |
