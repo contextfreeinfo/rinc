@@ -1,0 +1,131 @@
+# Builds and tests on every push and pull request:
+#   web      the VM-only web player (rim.wasm), with zig: only CI needs zig
+#   desktop  rim for Windows, macOS (universal) and Linux, with the web player built in, so rim -web
+#            and rim -export work without anything else installed; tests run every cart headless
+#   board    rim.uf2 for the Fruit Jam, with the Pico SDK and Arm's toolchain
+# A tag like v0.1.0 also publishes all of them as a GitHub release.
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  PICO_SDK_VERSION: 2.3.1
+  ARM_TOOLCHAIN: 15.2.rel1
+  ZIG_VERSION: 0.15.2
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: Build the web player
+        run: python3 tools/web.py --wasm=rim.wasm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rim-wasm
+          path: rim.wasm
+
+  desktop:
+    needs: web
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: rim-windows-x86_64.exe
+            exe: build/Release/rim.exe
+          - os: macos-latest
+            name: rim-macos-universal
+            exe: build/rim
+            flags: '"-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"'
+          - os: ubuntu-22.04 # (an older glibc: the binary runs on more Linux systems)
+            name: rim-linux-x86_64
+            exe: build/rim
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: rim-wasm
+      - name: Install SDL's build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libasound2-dev libpulse-dev libpipewire-0.3-dev libx11-dev libxext-dev \
+            libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev \
+            libdecor-0-dev libdrm-dev libgbm-dev libgl1-mesa-dev libegl1-mesa-dev libdbus-1-dev libudev-dev
+      - name: Configure
+        shell: bash
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DRIM_PLATFORM=desktop -DRIM_WEB_WASM=rim.wasm ${{ matrix.flags }}
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Name the binary
+        shell: bash
+        run: mkdir dist && cp ${{ matrix.exe }} dist/${{ matrix.name }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/${{ matrix.name }}
+
+  board:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Cache the toolchain and SDK
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ~/pico
+          key: pico-${{ env.PICO_SDK_VERSION }}-arm-${{ env.ARM_TOOLCHAIN }}
+      - name: Get Arm's toolchain and the Pico SDK
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/pico && cd ~/pico
+          curl -sSfL https://developer.arm.com/-/media/Files/downloads/gnu/$ARM_TOOLCHAIN/binrel/arm-gnu-toolchain-$ARM_TOOLCHAIN-x86_64-arm-none-eabi.tar.xz | tar xJ
+          mv arm-gnu-toolchain-* arm
+          git clone -q --depth 1 --branch $PICO_SDK_VERSION https://github.com/raspberrypi/pico-sdk.git
+          git -C pico-sdk submodule update -q --init --depth 1 lib/tinyusb
+      - name: Build
+        run: |
+          sudo apt-get install -y ninja-build
+          export PATH=~/pico/arm/bin:$PATH
+          cmake -S . -B build -G Ninja -DPICO_SDK_PATH=$HOME/pico/pico-sdk
+          cmake --build build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rim.uf2
+          path: build/rim.uf2
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [web, desktop, board]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes

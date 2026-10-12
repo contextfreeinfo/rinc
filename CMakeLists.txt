@@ -91,4 +91,36 @@ else()
     target_link_libraries(rim PRIVATE SDL3::SDL3-static)
     target_compile_definitions(rim PRIVATE RIM_SDL=1)
   endif()
+  # rim -web: the web player built in, from a VM-only wasm (python tools/web.py --wasm=rim.wasm; CI
+  # builds one), so making a page needs neither zig nor Python
+  set(RIM_WEB_WASM "" CACHE FILEPATH "VM-only rim.wasm to build in, for rim -web")
+  if(RIM_WEB_WASM)
+    get_filename_component(wasm ${RIM_WEB_WASM} ABSOLUTE BASE_DIR ${CMAKE_CURRENT_LIST_DIR}) # (relative: to the source)
+    set(player ${CMAKE_CURRENT_BINARY_DIR}/web_player.c)
+    add_custom_command(OUTPUT ${player}
+      COMMAND ${CMAKE_COMMAND} -DWASM=${wasm} -DPAGE=${CMAKE_CURRENT_LIST_DIR}/src/web/page.html -DOUT=${player}
+        -P ${CMAKE_CURRENT_LIST_DIR}/tools/embed.cmake
+      DEPENDS ${wasm} src/web/page.html tools/embed.cmake)
+    target_sources(rim PRIVATE ${player})
+    target_compile_definitions(rim PRIVATE RIM_WEB=1)
+  endif()
+
+  # tests: every cart runs headless for a few seconds; a cart exported runs the same; with the web
+  # player, a page gets made
+  enable_testing()
+  file(GLOB carts ${CMAKE_CURRENT_LIST_DIR}/carts/*.rio)
+  foreach(cart ${carts})
+    get_filename_component(name ${cart} NAME_WE)
+    add_test(NAME cart_${name} COMMAND rim ${cart} -frames 180 -o ${CMAKE_CURRENT_BINARY_DIR}/${name}.ppm)
+  endforeach()
+  set(game ${CMAKE_CURRENT_BINARY_DIR}/breakout-game${CMAKE_EXECUTABLE_SUFFIX})
+  add_test(NAME export_native COMMAND rim ${CMAKE_CURRENT_LIST_DIR}/carts/breakout.rio -export ${game})
+  add_test(NAME export_native_runs COMMAND ${game} -frames 180 -o ${CMAKE_CURRENT_BINARY_DIR}/breakout-game.ppm)
+  set_tests_properties(export_native_runs PROPERTIES DEPENDS export_native)
+  # (the exported game draws exactly what rim does running the cart)
+  add_test(NAME export_native_same COMMAND ${CMAKE_COMMAND} -E compare_files ${CMAKE_CURRENT_BINARY_DIR}/breakout.ppm ${CMAKE_CURRENT_BINARY_DIR}/breakout-game.ppm)
+  set_tests_properties(export_native_same PROPERTIES DEPENDS "export_native_runs;cart_breakout")
+  if(RIM_WEB_WASM)
+    add_test(NAME export_web COMMAND rim ${CMAKE_CURRENT_LIST_DIR}/carts/breakout.rio -web ${CMAKE_CURRENT_BINARY_DIR}/breakout.html)
+  endif()
 endif()

@@ -13,8 +13,9 @@ lib/Pico-PIO-USB/  USB host over PIO, for keyboards on the Fruit Jam
 src/core/          shared by every platform: the screen, palette, font and console, host procs, the REPL
 src/rp2350/        the Fruit Jam: HDMI out (video.c), USB keyboards (keyboard.c), the main loop
 src/desktop/       a window (SDL3, built in) or headless
-src/web/           wasm for a web page (tools/web.py builds the page)
-tools/             font.py (the font table), web.py (a cart as one HTML page), send.py (a cart to the board)
+src/web/           wasm for a web page, and the page around it (page.html)
+tools/             font.py (the font table), web.py (a cart as one HTML page, or just the wasm), send.py
+                   (a cart to the board), embed.cmake (the web player, built into the desktop rim)
 carts/             rio programs
 ```
 
@@ -69,22 +70,40 @@ cmake --build build-desktop --config Release
 build-desktop/rim carts/breakout.rio                      # play, in a window (Esc quits)
 build-desktop/rim                                         # a REPL in the terminal
 build-desktop/rim carts/breakout.rio -frames 120 -o s.ppm # no window: run 120 frames, save the screen
+build-desktop/rim carts/breakout.rio -export breakout     # a game to hand out: rim with the cart in it
+build-desktop/rim carts/breakout.rio -web breakout.html   # a page that plays it (see below)
 ```
 
 The result is one executable: SDL3 and (with MSVC) the C runtime are linked in. `-DRIM_SDL=OFF` builds
-it without a window.
+it without a window. `ctest --test-dir build-desktop -C Release` runs every cart headless, and checks
+that an exported game draws exactly what rim does.
+
+`-export` writes a copy of rim with the cart after it, compiled (`breakout.exe` on Windows: give the
+name you want). Started with no cart, it runs the one it carries, in a window, or headless with
+`-frames`. Exports are as portable as the rim that made them: Windows, macOS or Linux.
 
 ## The web
 
 ```sh
-python tools/web.py carts/breakout.rio breakout.html
+rim carts/breakout.rio -web breakout.html
 ```
 
-makes one self-contained page: the cart compiled to an image (by `rim -i`, so build the desktop rim
-first), Rim's VM as wasm with no compiler in it (built with `zig cc`, no emscripten), and a small JS
-host. Breakout comes to 47 KB (22 KB gzipped): 31 KB of wasm and a 2.4 KB image. Open it from disk or
-any server. A cart whose code calls a host proc that compiles rio at runtime would get the compiler
-too (none exist yet).
+makes one self-contained page: the cart compiled to an image, Rim's VM as wasm with no compiler in
+it, and a small JS host (`src/web/page.html`). Breakout comes to 52 KB (24 KB gzipped): 33 KB of wasm
+and a 2.5 KB image. Open it from disk or any server.
+
+The desktop rim has the wasm built in when it's configured with `-DRIM_WEB_WASM=rim.wasm`, which the
+CI builds and releases do. Making that wasm takes zig (`zig cc`, no emscripten):
+`python tools/web.py --wasm=rim.wasm`. `python tools/web.py carts/breakout.rio breakout.html` makes
+the same page directly, with zig. A cart whose code calls a host proc that compiles rio at runtime
+would need the compiler in the wasm too (none exist yet): only web.py would do that.
+
+## CI and releases
+
+`.github/workflows/ci.yml` builds and tests on every push: the web player's wasm (with zig), the
+desktop rim for Windows, macOS (universal) and Linux with that wasm built in (each runs the tests), and
+`rim.uf2` for the Fruit Jam (Arm's toolchain and the Pico SDK). Each is kept as a download on the run.
+A tag like `v0.1.0` also publishes them all as a GitHub release.
 
 ## Working on rio at the same time
 

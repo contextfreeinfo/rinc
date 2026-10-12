@@ -7,6 +7,10 @@
      -wav sound.wav            with -frames: the sound those frames made, as a WAV file
      -i cart.img               compile to an image (see rio_image_load) instead, and list the host
                                procs its code calls (tools/web.py uses both)
+     -export game[.exe]        a copy of this rim with the cart in it, compiled: it runs the cart
+                               (with the options above, too), so it's a game to hand out
+     -web game.html            one page that plays the cart in a browser: the web player (built in
+                               when RIM_WEB_WASM is set) with the cart, compiled, all inline
    The app space is 256 KB, as on the Fruit Jam and the web, so a cart that fits one fits all three.
    The window is SDL3, linked in statically (RIM_SDL, on by default). */
 #define _CRT_SECURE_NO_WARNINGS
@@ -15,6 +19,14 @@
 #include <string.h>
 #include <time.h>
 #include "rim.h"
+#ifdef _WIN32
+__declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(void *module, char *name, unsigned long size);
+#else
+#include <sys/stat.h>
+#endif
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
 #if RIM_SDL
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -44,17 +56,108 @@ static int save_ppm(const char *path) { /* the screen through the palette, as 8-
   return fclose(f);
 }
 
-/* -i: the compiled cart as an image, and the host procs its code calls, one per line */
+/* the cart compiled, as an image in image[]: its size, or 0 after reporting why not. list: print the
+   host procs its code calls, one per line */
 #define OPENUM(o) OP_##o,
 enum { RIO_OPS(OPENUM) OP_COUNT };
-static int save_image(const char *cart, const char *path, size_t n) {
-  uint32_t size, pc; uint8_t used[RIO_MAX_FFI] = {0}; FILE *f; int k;
-  if (rio_compile(&vm, src, (uint32_t)n)) { fprintf(stderr, "%s:%s\n", cart, rio_error(&vm)); return 1; }
+static uint32_t make_image(const char *cart, size_t n, int list) {
+  uint32_t size, pc; uint8_t used[RIO_MAX_FFI] = {0}; int k;
+  if (rio_compile(&vm, src, (uint32_t)n)) { fprintf(stderr, "%s:%s\n", cart, rio_error(&vm)); return 0; }
   for (pc = 0; pc < vm.pc; pc++) if (vm.code[pc].op == OP_FFI && vm.code[pc].c < RIO_MAX_FFI) used[vm.code[pc].c] = 1;
-  for (k = 0; k < vm.nffi; k++) if (used[k]) printf("host %s\n", vm.ffi[k].name);
-  if (!(size = rio_image_save(&vm, image, sizeof image))) { fprintf(stderr, "rim: can't make an image\n"); return 1; }
-  if (!(f = fopen(path, "wb")) || fwrite(image, 1, size, f) != size || fclose(f)) { fprintf(stderr, "rim: can't write %s\n", path); return 1; }
+  for (k = 0; list && k < vm.nffi; k++) if (used[k]) printf("host %s\n", vm.ffi[k].name);
+  if (!(size = rio_image_save(&vm, image, sizeof image))) fprintf(stderr, "rim: can't make an image\n");
+  return size;
+}
+static int write_file(const char *path, const void *a, size_t an, const void *b, size_t bn, const void *c, size_t cn) {
+  FILE *f = fopen(path, "wb"); int bad;
+  if (!f) { fprintf(stderr, "rim: can't write %s\n", path); return 1; }
+  bad = fwrite(a, 1, an, f) != an || fwrite(b, 1, bn, f) != bn || fwrite(c, 1, cn, f) != cn;
+  if (fclose(f) || bad) { fprintf(stderr, "rim: can't write %s\n", path); return 1; }
   return 0;
+}
+
+/* -export: this program's own file, with an image after it and then a trailer: its size (4 bytes,
+   little-endian) and MAGIC. At startup rim looks for one (so a cart in it runs instead of the REPL) */
+#define MAGIC "RIMCART1"
+static char *self_file(size_t *len) {
+  char path[4096]; FILE *f; char *b; long n;
+#if defined(_WIN32)
+  unsigned long k = GetModuleFileNameA(0, path, sizeof path);
+  if (!k || k >= sizeof path) return 0;
+#elif defined(__APPLE__)
+  uint32_t k = sizeof path;
+  if (_NSGetExecutablePath(path, &k)) return 0;
+#else
+  strcpy(path, "/proc/self/exe");
+#endif
+  if (!(f = fopen(path, "rb"))) return 0;
+  if (fseek(f, 0, SEEK_END) || (n = ftell(f)) <= 0 || fseek(f, 0, SEEK_SET) || !(b = malloc((size_t)n))) { fclose(f); return 0; }
+  if (fread(b, 1, (size_t)n, f) != (size_t)n) { free(b); b = 0; }
+  fclose(f); *len = (size_t)n;
+  return b;
+}
+/* the size of a cart at the end of file b (n long), or 0 if there's none */
+static uint32_t carried(const char *b, size_t n) {
+  uint32_t k;
+  if (n < 12 || memcmp(b + n - 8, MAGIC, 8)) return 0;
+  memcpy(&k, b + n - 12, 4);
+  return k <= n - 12 && k <= sizeof image ? k : 0;
+}
+static int export_native(const char *path, uint32_t size) {
+  size_t n; char *self = self_file(&n), tail[12]; int r;
+  if (!self) { fprintf(stderr, "rim: can't read my own program file\n"); return 1; }
+  if (carried(self, n)) n -= carried(self, n) + 12; /* (exporting from an export: just this cart) */
+  memcpy(tail, &size, 4); memcpy(tail + 4, MAGIC, 8);
+  r = write_file(path, self, n, image, size, tail, 12);
+  free(self);
+#ifndef _WIN32
+  if (!r) chmod(path, 0755);
+#endif
+  return r;
+}
+
+#if RIM_WEB
+extern const unsigned char rim_web_wasm[];
+extern const unsigned rim_web_wasm_size;
+extern const char rim_web_page[];
+#endif
+/* base64 of b (n long) into out, which has room for 4 * ((n + 2) / 3) characters */
+static size_t base64(const uint8_t *b, size_t n, char *out) {
+  static const char d[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  size_t i, k = 0;
+  for (i = 0; i < n; i += 3) {
+    uint32_t v = (uint32_t)b[i] << 16 | (i + 1 < n ? (uint32_t)b[i + 1] << 8 : 0) | (i + 2 < n ? b[i + 2] : 0);
+    out[k++] = d[v >> 18]; out[k++] = d[v >> 12 & 63];
+    out[k++] = i + 1 < n ? d[v >> 6 & 63] : '='; out[k++] = i + 2 < n ? d[v & 63] : '=';
+  }
+  return k;
+}
+/* -web: the page, with the title (the cart's name), the wasm and the image in place of {{TITLE}},
+   {{WASM}} and {{CART}} */
+static int export_web(const char *path, const char *cart, uint32_t size) {
+#if RIM_WEB
+  const char *p = rim_web_page, *name = cart, *q; char *wasm, *img, title[256]; size_t nw, ni, k = 0; FILE *f; int bad = 0;
+  for (q = cart; *q; q++) if (*q == '/' || *q == '\\') name = q + 1;
+  while (name[k] && name[k] != '.' && k < sizeof title - 1) { title[k] = strchr("<>&\"", name[k]) ? '_' : name[k]; k++; }
+  title[k] = 0;
+  wasm = malloc(4 * (rim_web_wasm_size / 3 + 1)); img = malloc(4 * (size / 3 + 1));
+  if (!wasm || !img || !(f = fopen(path, "wb"))) { free(wasm); free(img); fprintf(stderr, "rim: can't write %s\n", path); return 1; }
+  nw = base64(rim_web_wasm, rim_web_wasm_size, wasm); ni = base64(image, size, img);
+  while (*p) {
+    if (!strncmp(p, "{{TITLE}}", 9)) { fputs(title, f); p += 9; }
+    else if (!strncmp(p, "{{WASM}}", 8)) { fwrite(wasm, 1, nw, f); p += 8; }
+    else if (!strncmp(p, "{{CART}}", 8)) { fwrite(img, 1, ni, f); p += 8; }
+    else fputc(*p++, f);
+  }
+  bad = ferror(f); if (fclose(f)) bad = 1;
+  free(wasm); free(img);
+  if (bad) { fprintf(stderr, "rim: can't write %s\n", path); return 1; }
+  return 0;
+#else
+  (void)path; (void)cart; (void)size;
+  fprintf(stderr, "rim: this rim was built without the web player (RIM_WEB_WASM)\n");
+  return 1;
+#endif
 }
 
 /* the sound -frames made, as a 16-bit stereo WAV file */
@@ -130,23 +233,42 @@ static int window(const char *title) {
 #endif
 
 int main(int argc, char **argv) {
-  const char *cart = 0, *out = 0, *img = 0, *wavout = 0; int i, fn, frames = 0;
+  const char *cart = 0, *out = 0, *img = 0, *wavout = 0, *exp = 0, *web = 0; int i, fn, frames = 0; uint32_t size = 0;
   for (i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "-o") && i + 1 < argc) out = argv[++i];
     else if (!strcmp(argv[i], "-frames") && i + 1 < argc) frames = atoi(argv[++i]);
     else if (!strcmp(argv[i], "-i") && i + 1 < argc) img = argv[++i];
     else if (!strcmp(argv[i], "-wav") && i + 1 < argc) wavout = argv[++i];
-    else if (argv[i][0] == '-' || cart) { fprintf(stderr, "usage: rim [cart.rio] [-frames n] [-o screen.ppm]\n"); return 2; }
+    else if (!strcmp(argv[i], "-export") && i + 1 < argc) exp = argv[++i];
+    else if (!strcmp(argv[i], "-web") && i + 1 < argc) web = argv[++i];
+    else if (argv[i][0] == '-' || cart) {
+      fprintf(stderr, "usage: rim [cart.rio] [-frames n] [-o screen.ppm] [-wav sound.wav] [-i cart.img] [-export game] [-web game.html]\n");
+      return 2;
+    }
     else cart = argv[i];
   }
   t0 = clock(); rim_time = now;
   if (rim_start(&vm, rio_mem, sizeof rio_mem, put)) { fprintf(stderr, "rim: can't start\n"); return 1; }
+  if (!cart) { /* an exported game: the cart it carries */
+    size_t n; char *self = self_file(&n);
+    if (self && (size = carried(self, n))) memcpy(image, self + n - 12 - size, size);
+    free(self);
+    if (size) cart = argc > 0 ? argv[0] : "rim";
+  }
   if (cart) {
-    FILE *f = fopen(cart, "rb"); size_t n;
-    if (!f) { fprintf(stderr, "rim: can't open %s\n", cart); return 2; }
-    n = fread(src, 1, sizeof src, f); fclose(f);
-    if (img) return save_image(cart, img, n);
-    if (rio_compile(&vm, src, (uint32_t)n) || rio_run(&vm) || ((fn = rio_func(&vm, "main")) >= 0 && rio_call(&vm, fn))) {
+    if (!size) {
+      FILE *f = fopen(cart, "rb"); size_t n;
+      if (!f) { fprintf(stderr, "rim: can't open %s\n", cart); return 2; }
+      n = fread(src, 1, sizeof src, f); fclose(f);
+      if (img || exp || web) {
+        if (!(size = make_image(cart, n, img != 0))) return 1;
+        if (img && write_file(img, image, size, 0, 0, 0, 0)) return 1;
+        if (exp && export_native(exp, size)) return 1;
+        return web ? export_web(web, cart, size) : 0;
+      }
+      if (rio_compile(&vm, src, (uint32_t)n)) { fprintf(stderr, "%s:%s\n", cart, rio_error(&vm)); return 1; }
+    } else if (rio_image_load(&vm, image, size)) { fprintf(stderr, "%s: %s\n", cart, rio_error(&vm)); return 1; }
+    if (rio_run(&vm) || ((fn = rio_func(&vm, "main")) >= 0 && rio_call(&vm, fn))) {
       fflush(stdout); fprintf(stderr, "%s:%s\n", cart, rio_error(&vm)); return 1;
     }
 #if RIM_SDL
