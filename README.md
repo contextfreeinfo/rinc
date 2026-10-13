@@ -174,7 +174,9 @@ would need the compiler in the wasm too (none exist yet): only web.py would do t
 `.github/workflows/ci.yml` builds and tests on every push: the web player's wasm (with zig), the
 desktop rim for Windows, macOS (universal) and Linux with that wasm built in (each runs the tests), and
 `rim.uf2` for the Fruit Jam (Arm's toolchain and the Pico SDK). Each is kept as a download on the run.
-A tag like `v0.1.0` also publishes them all as a GitHub release.
+A tag like `v0.1.0` also publishes them all as a GitHub release. Each night that `main` has changed, and whenever
+the ci workflow is run by hand (Actions > ci > Run workflow), they're published as the rolling
+[nightly](https://github.com/contextfreeinfo/rinc/releases/tag/nightly) prerelease.
 
 ## Working on rio at the same time
 

@@ -3,7 +3,9 @@
 #   desktop  rim for Windows, macOS (universal) and Linux, with the web player built in, so rim -web
 #            and rim -export work without anything else installed; tests run every cart headless
 #   board    rim.uf2 for the Fruit Jam, with the Pico SDK and Arm's toolchain
-# A tag like v0.1.0 also publishes all of them as a GitHub release.
+# A tag like v0.1.0 also publishes all of them as a GitHub release. Each night (if main changed since
+# the last one), and whenever it's run by hand (Actions > ci > Run workflow), they go to the rolling
+# "nightly" prerelease instead.
 name: ci
 
 on:
@@ -11,6 +13,9 @@ on:
     branches: ["**"]
     tags: ["v*"]
   pull_request:
+  schedule:
+    - cron: "37 8 * * *" # (daily; GitHub runs schedules on the default branch)
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -21,7 +26,26 @@ env:
   ZIG_VERSION: 0.15.2
 
 jobs:
+  # whether to go on: a scheduled run skips everything when main hasn't changed since the last nightly
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.check.outputs.go }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          go=true
+          if [ "$GITHUB_EVENT_NAME" = schedule ]; then
+            last=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/nightly" --jq .object.sha 2>/dev/null || true)
+            [ "$last" = "$GITHUB_SHA" ] && go=false
+          fi
+          echo "go=$go" >> "$GITHUB_OUTPUT"
+
   web:
+    needs: check
+    if: needs.check.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -84,6 +108,8 @@ jobs:
           path: dist/${{ matrix.name }}
 
   board:
+    needs: check
+    if: needs.check.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -115,7 +141,7 @@ jobs:
           path: build/rim.uf2
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     needs: [web, desktop, board]
     runs-on: ubuntu-latest
     permissions:
@@ -126,6 +152,15 @@ jobs:
           path: dist
           merge-multiple: true
       - name: Publish
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+      - name: Replace the nightly
+        if: github.ref_type != 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete nightly --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+          gh release create nightly dist/* --repo "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" --title "Nightly" \
+            --notes "Built from ${GITHUB_SHA::7} on $(date -u +%Y-%m-%d). Replaced each night main changes, and when the ci workflow is run by hand."
