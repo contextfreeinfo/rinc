@@ -7,6 +7,17 @@ Ball :: struct
   x, y, dx, dy: Float
 end
 
+# To avoid speedup from hitting on edges.
+# Keeps a constant speed.
+Ball.fixSpeed :: proc()
+  wantedSpeed := 2.5
+  speed :=
+    sqrt(self.dx * self.dx + self.dy * self.dy)
+  scale := wantedSpeed / speed
+  self.dx *= scale
+  self.dy *= scale
+end
+
 bricks: [60]Int # ROWS * COLS, by row: a brick's color, or 0 once it's hit
 ball := Ball{x = 160.0, y = 200.0}
 padx := 140.0
@@ -53,6 +64,7 @@ update* :: proc()
       serving = false
       ball.dx = 1.5
       ball.dy = -2.5
+      ball.fixSpeed()
     end
     return
   end
@@ -69,6 +81,7 @@ update* :: proc()
   if ball.dy > 0.0 and ball.y >= 224.0 and ball.y <= 230.0 and ball.x >= padx - 2.0 and ball.x <= padx + 42.0
     ball.dy = -ball.dy
     ball.dx = (ball.x - padx - 20.0) / 8.0
+    ball.fixSpeed()
   end
   if ball.y > 242.0
     lives -= 1

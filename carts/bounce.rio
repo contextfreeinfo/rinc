@@ -4,7 +4,7 @@ Ball :: struct
   c: Int
 end
 
-balls: [..64]Ball
+balls: [..512]Ball
 blip: Blob[1200] # a falling square wave, 8-bit, played at 22050 a second
 for i in 0..<1200
   v := (1200 - i) / 30 # (a third of full scale: square waves are harsh)
@@ -20,12 +20,14 @@ tick := 0
 
 add :: proc()
   n := balls.len()
-  ok := balls.push(Ball{x = 160.0, y = 40.0, dx = (n % 7).toFloat() - 3.0, dy = 0.0, c = 8 + n % 8})
+  # Use n for simple variance, but always have some nonzero dx.
+  ok := balls.push(Ball{x = 160.0, y = 40.0, dx = (n % 8).toFloat() - 3.5, dy = 0.0, c = 8 + n % 8})
 end
 add()
 
 update* :: proc()
   tick += 1
+  # TODO What really is going on here?
   gx = (btn(1) - btn(0)).toFloat() * 0.15
   gy = (btn(3) - btn(2)).toFloat() * 0.15 + 0.15
   if btn(4) == 1 and not held
@@ -35,7 +37,8 @@ update* :: proc()
   for b, k in balls
     hit := false
     if btn(5) == 1
-      b.dy -= 1.0
+      # Include some variance also in the shake.
+      b.dy -= 1.0 + 0.05 * ((k % 7).toFloat() - 3.0)
     end
     b.dx += gx
     b.dy += gy
@@ -64,4 +67,9 @@ draw* :: proc()
     rect(b.x.toInt() - 4, b.y.toInt() - 4, 8, 8, b.c)
   end
   print("arrows tilt  V adds  C shakes", 4, 4, 6)
+  # Report ball count.
+  report: Blob[..100]
+  report.clear()
+  report.format("count: ", balls.len())
+  print(report[:].asString(), 4, 13, 6)
 end
