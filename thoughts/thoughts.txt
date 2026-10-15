@@ -1,0 +1,38 @@
+This document is written by hand.
+
+---
+
+Hey look! I hand coded a compiler to arm32 thumb2 instructions that gets a
+subset of my programming language plans working.
+
+Let's see it in action and some numbers I gathered for the speed it runs at.
+
+---
+
+There's two ways to get out of the rat race:
+
+1. Increase your income, well really your passive income, or
+2. Decrease your expenses.
+
+Or some combination of those.
+
+Speaking metaphorically for computing, newer systems get more powerful with
+time, but it never ends. AI is part of that. I've found agentic coding makes me
+far more productive, but it's just part of the same rat race. Maybe I still need
+to live in that for my financial life and coping in the world around me.
+
+But sometimes I just want to leave the race. And for computing, that's what this
+video is about. For what I actually enjoy doing, this is about building an off
+ramp from increasing computer specs, from the internet, and from AI. I'm making
+a different corner I can spend some time in.
+
+And as of the very recent past, I'm using AI to help me build that off ramp.
+
+And my project isn't the only game in town, but I'm aiming to build a cheaper
+and more standalone system than many others out there. While also still
+providing as powerful of a system that I can within the constraints.
+
+Am I Boromir trying to defeat Sauron with the one ring? Am I Luthen using the
+enemy's methods to fight them? Well, one difference is that I'm not trying to
+destroy anything. Just to make myself a little corner that I'd like to spend
+some time in. A place for escape sometimes.
