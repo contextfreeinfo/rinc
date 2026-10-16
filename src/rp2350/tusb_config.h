@@ -1,4 +1,4 @@
-/* TinyUSB for Rim: device on the native USB port (pico_stdio_usb's serial, as configured there), and a
+/* TinyUSB for Rinc: device on the native USB port (pico_stdio_usb's serial, as configured there), and a
    host on the USB-A ports through PIO-USB, for keyboards (through the Fruit Jam's hub).
    This takes the place of pico_stdio_usb's tusb_config.h (same include guard, found first). */
 #ifndef _PICO_STDIO_USB_TUSB_CONFIG_H

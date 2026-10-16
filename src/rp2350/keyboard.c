@@ -10,38 +10,38 @@
 #include "tusb.h"
 #include "keyboard.h"
 #include "gamepad.h"
-#include "rim.h"
+#include "rinc.h"
 
-#define REPEAT_DELAY_US 500000
-#define REPEAT_EVERY_US 40000
+#define rinc_REPEAT_DELAY_US 500000
+#define rinc_REPEAT_EVERY_US 40000
 
-static const uint8_t ascii[128][2] = {HID_KEYCODE_TO_ASCII};
-static void note(const char *fmt, unsigned a, unsigned b, unsigned c);
-static char queue[64];
-static volatile unsigned qhead, qtail;
-static hid_keyboard_report_t last;
-static uint8_t repeat_key, repeat_mods; static uint64_t repeat_at;
-uint8_t rim_keys_down[32]; /* bit k: HID usage k is held */
+static const uint8_t rinc_ascii[128][2] = {HID_KEYCODE_TO_ASCII};
+static void rinc_note(const char *fmt, unsigned a, unsigned b, unsigned c);
+static char rinc_queue[64];
+static volatile unsigned rinc_qhead, rinc_qtail;
+static hid_keyboard_report_t rinc_last;
+static uint8_t rinc_repeatKey, rinc_repeatMods; static uint64_t rinc_repeatAt;
+uint8_t rinc_keysDown[32]; /* bit k: HID usage k is held */
 
-static void push(int c) {
-  unsigned next = (qhead + 1) % sizeof queue;
-  if (next != qtail) { queue[qhead] = (char)c; qhead = next; }
+static void rinc_push(int c) {
+  unsigned next = (rinc_qhead + 1) % sizeof rinc_queue;
+  if (next != rinc_qtail) { rinc_queue[rinc_qhead] = (char)c; rinc_qhead = next; }
 }
 /* editing keys, as a terminal sends them: ESC [ and a letter (arrows, Home, End) or 3~ (Delete) */
-static int editing(uint8_t key) {
+static int rinc_editing(uint8_t key) {
   const char *seq = key == HID_KEY_ARROW_UP ? "A" : key == HID_KEY_ARROW_DOWN ? "B" : key == HID_KEY_ARROW_RIGHT ? "C" :
     key == HID_KEY_ARROW_LEFT ? "D" : key == HID_KEY_HOME ? "H" : key == HID_KEY_END ? "F" : key == HID_KEY_DELETE ? "3~" : 0;
   if (!seq) return 0;
-  push(27); push('['); while (*seq) push(*seq++);
+  rinc_push(27); rinc_push('['); while (*seq) rinc_push(*seq++);
   return 1;
 }
 /* a key press as a character: ASCII, Enter as \r, Backspace as 8, Ctrl+letter as its control code */
-static int character(uint8_t key, uint8_t mods) {
+static int rinc_character(uint8_t key, uint8_t mods) {
   int shift = mods & (KEYBOARD_MODIFIER_LEFTSHIFT | KEYBOARD_MODIFIER_RIGHTSHIFT), c;
   if (key == HID_KEY_ENTER || key == HID_KEY_KEYPAD_ENTER) return '\r';
   if (key == HID_KEY_BACKSPACE) return 8;
   if (key >= 128) return -1;
-  c = ascii[key][shift ? 1 : 0];
+  c = rinc_ascii[key][shift ? 1 : 0];
   if (!c) return -1;
   if (mods & (KEYBOARD_MODIFIER_LEFTCTRL | KEYBOARD_MODIFIER_RIGHTCTRL)) {
     if (c >= 'a' && c <= 'z') return c - 'a' + 1;
@@ -50,119 +50,119 @@ static int character(uint8_t key, uint8_t mods) {
   return c == '\n' ? '\r' : c;
 }
 
-static void report(const hid_keyboard_report_t *r) {
+static void rinc_report(const hid_keyboard_report_t *r) {
   int i, j;
-  memset(rim_keys_down, 0, sizeof rim_keys_down);
-  rim_keys_down[0xE0 >> 3] = r->modifier; /* (the modifiers, Ctrl Shift Alt and GUI left then right, are keys 0xE0-0xE7: a byte of their own) */
+  memset(rinc_keysDown, 0, sizeof rinc_keysDown);
+  rinc_keysDown[0xE0 >> 3] = r->modifier; /* (the modifiers, Ctrl Shift Alt and GUI left then right, are keys 0xE0-0xE7: a byte of their own) */
   for (i = 0; i < 6; i++) {
     uint8_t k = r->keycode[i], was = 0;
     if (!k) continue;
-    rim_keys_down[k >> 3] |= (uint8_t)(1u << (k & 7));
-    for (j = 0; j < 6; j++) if (last.keycode[j] == k) was = 1;
+    rinc_keysDown[k >> 3] |= (uint8_t)(1u << (k & 7));
+    for (j = 0; j < 6; j++) if (rinc_last.keycode[j] == k) was = 1;
     if (!was) { /* newly pressed: type it, and repeat it if held */
-      int c = editing(k) ? -1 : character(k, r->modifier);
-      if (c >= 0) push(c);
-      repeat_key = k; repeat_mods = r->modifier; repeat_at = time_us_64() + REPEAT_DELAY_US;
+      int c = rinc_editing(k) ? -1 : rinc_character(k, r->modifier);
+      if (c >= 0) rinc_push(c);
+      rinc_repeatKey = k; rinc_repeatMods = r->modifier; rinc_repeatAt = time_us_64() + rinc_REPEAT_DELAY_US;
     }
   }
-  for (i = 0; i < 6 && repeat_key; i++) if (r->keycode[i] == repeat_key) break;
-  if (i == 6) repeat_key = 0; /* let go */
-  last = *r;
+  for (i = 0; i < 6 && rinc_repeatKey; i++) if (r->keycode[i] == rinc_repeatKey) break;
+  if (i == 6) rinc_repeatKey = 0; /* let go */
+  rinc_last = *r;
 }
 
 /* consumer control (volume) reports: for each device's HID interface, its report id + 1 (1: the
    reports have no id), or 0 for none; and which of up, down, mute were held last time */
-#define NDEV (CFG_TUH_DEVICE_MAX + 2)
-static uint8_t consumer[NDEV][CFG_TUH_HID], held[NDEV][CFG_TUH_HID];
-static void consumer_report(uint8_t dev, uint8_t instance, const uint8_t *r, uint16_t len) {
-  int id = consumer[dev][instance] - 1, now = 0, i;
+#define rinc_NDEV (CFG_TUH_DEVICE_MAX + 2)
+static uint8_t rinc_consumer[rinc_NDEV][CFG_TUH_HID], rinc_held[rinc_NDEV][CFG_TUH_HID];
+static void rinc_consumerReport(uint8_t dev, uint8_t instance, const uint8_t *r, uint16_t len) {
+  int id = rinc_consumer[dev][instance] - 1, now = 0, i;
   if (id > 0) { if (!len || r[0] != id) return; r++; len--; }
   for (i = 0; i + 1 < len; i += 2) { /* (16-bit usages, pressed) */
     int u = r[i] | r[i + 1] << 8;
     now |= u == HID_USAGE_CONSUMER_VOLUME_INCREMENT ? 1 : u == HID_USAGE_CONSUMER_VOLUME_DECREMENT ? 2 : u == HID_USAGE_CONSUMER_MUTE ? 4 : 0;
   }
-  i = now & ~held[dev][instance]; /* newly pressed */
-  if (i & 1) rim_audio_volume(1);
-  if (i & 2) rim_audio_volume(-1);
-  if (i & 4) rim_audio_volume(0);
-  held[dev][instance] = (uint8_t)now;
+  i = now & ~rinc_held[dev][instance]; /* newly pressed */
+  if (i & 1) rinc_audioVolume(1);
+  if (i & 2) rinc_audioVolume(-1);
+  if (i & 4) rinc_audioVolume(0);
+  rinc_held[dev][instance] = (uint8_t)now;
 }
 
 void tuh_hid_mount_cb(uint8_t dev, uint8_t instance, uint8_t const *desc, uint16_t len) {
   tuh_hid_report_info_t info[8]; uint8_t p = tuh_hid_interface_protocol(dev, instance), n, k;
-  note("[usb] device %u: hid %u, protocol %u (1 keyboard, 2 mouse)\r\n", dev, instance, p);
-  if (dev < NDEV && instance < CFG_TUH_HID) {
-    consumer[dev][instance] = held[dev][instance] = 0;
+  rinc_note("[usb] device %u: hid %u, protocol %u (1 keyboard, 2 mouse)\r\n", dev, instance, p);
+  if (dev < rinc_NDEV && instance < CFG_TUH_HID) {
+    rinc_consumer[dev][instance] = rinc_held[dev][instance] = 0;
     n = tuh_hid_parse_report_descriptor(info, 8, desc, len);
     for (k = 0; k < n; k++)
       if (info[k].usage_page == HID_USAGE_PAGE_CONSUMER && info[k].usage == HID_USAGE_CONSUMER_CONTROL) {
-        consumer[dev][instance] = (uint8_t)(info[k].report_id + 1);
-        note("[usb] device %u: hid %u has volume keys\r\n", dev, instance, 0);
+        rinc_consumer[dev][instance] = (uint8_t)(info[k].report_id + 1);
+        rinc_note("[usb] device %u: hid %u has volume keys\r\n", dev, instance, 0);
       }
   }
   /* (a mouse interface that carries the volume keys too has been set to the boot protocol, which has
      only the mouse: once the whole device is set up, it goes back to full reports; see
      tuh_mount_cb) */
-  if (p == HID_ITF_PROTOCOL_KEYBOARD || (dev < NDEV && instance < CFG_TUH_HID && consumer[dev][instance] && p != HID_ITF_PROTOCOL_MOUSE))
+  if (p == HID_ITF_PROTOCOL_KEYBOARD || (dev < rinc_NDEV && instance < CFG_TUH_HID && rinc_consumer[dev][instance] && p != HID_ITF_PROTOCOL_MOUSE))
     tuh_hid_receive_report(dev, instance);
 }
 /* the next of a device's volume interfaces that needs full reports (one request at a time) */
-static void full_reports(uint8_t dev, uint8_t from) {
+static void rinc_fullReports(uint8_t dev, uint8_t from) {
   uint8_t i;
-  for (i = from; dev < NDEV && i < CFG_TUH_HID; i++)
-    if (consumer[dev][i] && tuh_hid_interface_protocol(dev, i) == HID_ITF_PROTOCOL_MOUSE) {
+  for (i = from; dev < rinc_NDEV && i < CFG_TUH_HID; i++)
+    if (rinc_consumer[dev][i] && tuh_hid_interface_protocol(dev, i) == HID_ITF_PROTOCOL_MOUSE) {
       if (tuh_hid_set_protocol(dev, i, HID_PROTOCOL_REPORT)) return;
       tuh_hid_receive_report(dev, i);
     }
 }
 void tuh_hid_set_protocol_complete_cb(uint8_t dev, uint8_t instance, uint8_t protocol) {
-  (void)protocol; tuh_hid_receive_report(dev, instance); full_reports(dev, (uint8_t)(instance + 1));
+  (void)protocol; tuh_hid_receive_report(dev, instance); rinc_fullReports(dev, (uint8_t)(instance + 1));
 }
 void tuh_hid_umount_cb(uint8_t dev, uint8_t instance) {
-  if (dev < NDEV && instance < CFG_TUH_HID) consumer[dev][instance] = 0;
-  repeat_key = 0; memset(rim_keys_down, 0, sizeof rim_keys_down);
+  if (dev < rinc_NDEV && instance < CFG_TUH_HID) rinc_consumer[dev][instance] = 0;
+  rinc_repeatKey = 0; memset(rinc_keysDown, 0, sizeof rinc_keysDown);
 }
 void tuh_hid_report_received_cb(uint8_t dev, uint8_t instance, uint8_t const *r, uint16_t len) {
   if (tuh_hid_interface_protocol(dev, instance) == HID_ITF_PROTOCOL_KEYBOARD && len >= sizeof(hid_keyboard_report_t))
-    report((const hid_keyboard_report_t *)(const void *)r);
-  else if (dev < NDEV && instance < CFG_TUH_HID && consumer[dev][instance]) consumer_report(dev, instance, r, len);
+    rinc_report((const hid_keyboard_report_t *)(const void *)r);
+  else if (dev < rinc_NDEV && instance < CFG_TUH_HID && rinc_consumer[dev][instance]) rinc_consumerReport(dev, instance, r, len);
   tuh_hid_receive_report(dev, instance);
 }
 
 /* before stdio_init_all: starting the USB serial port starts TinyUSB, host side included */
-void rim_keyboard_setup(void) {
+void rinc_keyboardSetup(void) {
   static pio_usb_configuration_t cfg = PIO_USB_DEFAULT_CONFIG;
   gpio_init(11); gpio_set_dir(11, GPIO_OUT); gpio_put(11, 1); /* power the USB-A ports */
   cfg.pin_dp = 1;
   cfg.tx_ch = 11; /* a DMA channel well past the video's */
   tuh_configure(BOARD_TUH_RHPORT, TUH_CFGID_RPI_PIO_USB_CONFIGURATION, &cfg);
 }
-void rim_keyboard_start(void) { rim_pad_notes(note); if (!tuh_inited()) tuh_init(BOARD_TUH_RHPORT); }
+void rinc_keyboardStart(void) { rinc_padNotes(rinc_note); if (!tuh_inited()) tuh_init(BOARD_TUH_RHPORT); }
 
 /* what's plugged in: kept, since it happens before a serial terminal can be there to see it */
-static char events[512]; static int nevents;
-static void note(const char *fmt, unsigned a, unsigned b, unsigned c) {
-  int n = snprintf(events + nevents, sizeof events - (size_t)nevents, fmt, a, b, c);
-  if (n > 0 && nevents + n < (int)sizeof events) nevents += n;
+static char rinc_events[512]; static int rinc_nevents;
+static void rinc_note(const char *fmt, unsigned a, unsigned b, unsigned c) {
+  int n = snprintf(rinc_events + rinc_nevents, sizeof rinc_events - (size_t)rinc_nevents, fmt, a, b, c);
+  if (n > 0 && rinc_nevents + n < (int)sizeof rinc_events) rinc_nevents += n;
 }
-const char *rim_keyboard_events(void) { events[nevents] = 0; return events; }
+const char *rinc_keyboardEvents(void) { rinc_events[rinc_nevents] = 0; return rinc_events; }
 void tuh_mount_cb(uint8_t dev) {
   uint16_t vid = 0, pid = 0;
   tuh_vid_pid_get(dev, &vid, &pid);
-  note("[usb] device %u: %04x:%04x\r\n", dev, vid, pid);
-  full_reports(dev, 0);
+  rinc_note("[usb] device %u: %04x:%04x\r\n", dev, vid, pid);
+  rinc_fullReports(dev, 0);
 }
-void tuh_umount_cb(uint8_t dev) { note("[usb] device %u gone\r\n", dev, 0, 0); }
+void tuh_umount_cb(uint8_t dev) { rinc_note("[usb] device %u gone\r\n", dev, 0, 0); }
 
-int rim_keyboard_char(void) {
+int rinc_keyboardChar(void) {
   int c;
-  tuh_task(); rim_pad_task();
-  if (repeat_key && time_us_64() >= repeat_at) {
-    int r = editing(repeat_key) ? -1 : character(repeat_key, repeat_mods);
-    if (r >= 0) push(r);
-    repeat_at = time_us_64() + REPEAT_EVERY_US;
+  tuh_task(); rinc_padTask();
+  if (rinc_repeatKey && time_us_64() >= rinc_repeatAt) {
+    int r = rinc_editing(rinc_repeatKey) ? -1 : rinc_character(rinc_repeatKey, rinc_repeatMods);
+    if (r >= 0) rinc_push(r);
+    rinc_repeatAt = time_us_64() + rinc_REPEAT_EVERY_US;
   }
-  if (qtail == qhead) return -1;
-  c = (unsigned char)queue[qtail]; qtail = (qtail + 1) % sizeof queue;
+  if (rinc_qtail == rinc_qhead) return -1;
+  c = (unsigned char)rinc_queue[rinc_qtail]; rinc_qtail = (rinc_qtail + 1) % sizeof rinc_queue;
   return c;
 }

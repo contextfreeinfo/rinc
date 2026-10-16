@@ -1,6 +1,6 @@
-# Third-party code in Rim
+# Third-party code in Rinc
 
-Rim's own code is dedicated to the public domain under CC0 1.0 (see LICENSE). These parts come from
+Rinc's own code is dedicated to the public domain under CC0 1.0 (see LICENSE). These parts come from
 others and keep their own licenses; their notices travel with builds that include them.
 
 | What | Where | License |
@@ -15,7 +15,7 @@ others and keep their own licenses; their notices travel with builds that includ
 | wasi-libc (from zig) | linked into web builds | MIT / Apache 2.0 with LLVM exception / CC0 parts |
 | rio | `lib/rio` (submodule) | CC0 1.0 |
 
-The 5x8 font (`src/core/font.c`, from spryjam's font files) and the carts are Rim's own, under CC0.
+The 5x8 font (`src/core/font.c`, from spryjam's font files) and the carts are Rinc's own, under CC0.
 
 ## wili8jam (MIT)
 

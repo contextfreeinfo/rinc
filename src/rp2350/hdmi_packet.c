@@ -1,6 +1,6 @@
 /* From pico_hdmi (github.com/fliperama86/pico_hdmi, commit 2aac8d8), which is public domain (the
    Unlicense): HDMI packets (InfoFrames, audio clock regeneration, audio samples), their BCH error
-   codes, and TERC4 encoding into HSTX words. Rim uses it as is, apart from the includes. */
+   codes, and TERC4 encoding into HSTX words. Rinc uses it as is, apart from the includes. */
 #include "hdmi_packet.h"
 
 /* (640x480: negative syncs, so MODE_SYNC_POSITIVE stays undefined) */

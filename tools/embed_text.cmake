@@ -1,4 +1,4 @@
-# cmake -DIN=system/launcher.rio -DOUT=launcher_src.c -DNAME=rim_launcher_src -P tools/embed_text.cmake
+# cmake -DIN=system/launcher.rio -DOUT=launcher_src.c -DNAME=rinc_launcherSrc -P tools/embed_text.cmake
 # A text file as a C array (0-terminated) and its length: source built into the firmware.
 file(READ ${IN} text HEX)
 string(LENGTH "${text}" n)
