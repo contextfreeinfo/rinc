@@ -129,6 +129,13 @@ else()
   # (the exported game draws exactly what rinc does running the cart)
   add_test(NAME export_native_same COMMAND ${CMAKE_COMMAND} -E compare_files ${CMAKE_CURRENT_BINARY_DIR}/breakout.ppm ${CMAKE_CURRENT_BINARY_DIR}/breakout-game.ppm)
   set_tests_properties(export_native_same PROPERTIES DEPENDS "export_native_runs;cart_breakout")
+  # every rio example in the docs, run by a headless rinc (with Rio's runner, once lib/rio has it)
+  find_package(Python3 COMPONENTS Interpreter)
+  if(Python3_FOUND AND EXISTS ${RIO_DIR}/tests/docs.py)
+    add_test(NAME docs COMMAND Python3::Interpreter ${RIO_DIR}/tests/docs.py $<TARGET_FILE:rinc>
+      ${CMAKE_CURRENT_LIST_DIR}/docs ${CMAKE_CURRENT_LIST_DIR}/README.md -- -frames 2)
+    set_tests_properties(docs PROPERTIES PASS_REGULAR_EXPRESSION "all [0-9]+ doc examples passed")
+  endif()
   # pc.rio, the host procs written out, matches what rinc registers
   add_executable(rinc_pc_test tests/pc.c)
   target_link_libraries(rinc_pc_test PRIVATE rinccore)
