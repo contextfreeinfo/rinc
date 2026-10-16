@@ -137,7 +137,7 @@ static void RIM_HOT mix_pcm16(Voice *v, int n) {
   uint32_t i = v->pos, fr = v->frac, step = v->step, fstep = v->fstep, loop0 = v->loop0, loop1 = v->loop1;
   uint32_t end = loop1 > loop0 ? loop1 : v->frames;
   int32_t gl = v->gl, gr = v->gr, *out = sums; int f, looping = loop1 > loop0;
-  const int16_t *data = (const int16_t *)(const void *)v->data; /* (data from rio_ptr: 2-byte aligned for 16-bit) */
+  const int16_t *data = (const int16_t *)(const void *)v->data; /* (data from rio_sliceBytes: 2-byte aligned for 16-bit) */
   for (f = 0; f < n; f++, out += 2) {
     int32_t a, b, x; uint32_t j;
     if (i >= end) {
@@ -230,7 +230,7 @@ void rim_audio_reset(void) { lock(1); memset(voices, 0, sizeof voices); lock(0);
 /* host procs. sound(voice, data, bits, channels, rate): play data (8 or 16 bits, or 4 for ADPCM in
    blocks of RIM_ADPCM_BLOCK bytes a channel; 1 or 2 channels) at rate frames a second, full volume,
    centered, once. A voice out of 0-7, or bad data, does nothing */
-static Voice *voice(RioVal *a) { return a[0].u < RIM_VOICES ? &voices[a[0].u] : 0; }
+static Voice *voice(rio_Val *a) { return a[0].u < RIM_VOICES ? &voices[a[0].u] : 0; }
 static void play(Voice *v, const uint8_t *p, uint32_t bytes, int bits, int channels, float rate, uint32_t block) {
   lock(1);
   v->data = p; v->bits = (uint8_t)bits; v->stereo = channels == 2;
@@ -243,16 +243,16 @@ static void play(Voice *v, const uint8_t *p, uint32_t bytes, int bits, int chann
   v->on = v->frames > 0;
   lock(0);
 }
-static void h_sound(Rio *vm, RioVal *a) {
-  Voice *v = voice(a); const uint8_t *p = (const uint8_t *)rio_ptr(vm, a + 1);
+static void h_sound(rio_Vm *vm, rio_Val *a) {
+  Voice *v = voice(a); const uint8_t *p = (const uint8_t *)rio_sliceBytes(vm, a + 1);
   if (!v || !p || (a[3].i != 4 && a[3].i != 8 && a[3].i != 16) || (a[4].i != 1 && a[4].i != 2)) return;
   play(v, p, a[2].u, a[3].i, a[4].i, a[5].f, RIM_ADPCM_BLOCK * a[4].u);
 }
 /* soundWav(voice, data): play a WAV file's sound (8- or 16-bit PCM, or IMA ADPCM; mono or stereo) at
    its own rate. Returns whether it could */
 static uint32_t le(const uint8_t *p, int n) { return n == 2 ? (uint32_t)(p[0] | p[1] << 8) : (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
-static void h_wav(Rio *vm, RioVal *a) {
-  Voice *v = voice(a); const uint8_t *p = (const uint8_t *)rio_ptr(vm, a + 1), *fmt = 0; uint32_t n = a[2].u, k = 12, size;
+static void h_wav(rio_Vm *vm, rio_Val *a) {
+  Voice *v = voice(a); const uint8_t *p = (const uint8_t *)rio_sliceBytes(vm, a + 1), *fmt = 0; uint32_t n = a[2].u, k = 12, size;
   int ok = 0;
   if (v && p && n >= 12 && !memcmp(p, "RIFF", 4) && !memcmp(p + 8, "WAVE", 4))
     for (; k + 8 <= n; k += 8 + size + (size & 1)) {
@@ -273,11 +273,11 @@ static void h_wav(Rio *vm, RioVal *a) {
     }
   a[0].i = ok;
 }
-static void h_rate(Rio *vm, RioVal *a) { Voice *v = voice(a); (void)vm; if (v) { lock(1); stepfor(v, a[1].f); lock(0); } }
-static void h_volume(Rio *vm, RioVal *a) { Voice *v = voice(a); (void)vm; if (v) { lock(1); v->vol = clampf(a[1].f, 0, 1); gains(v); lock(0); } }
-static void h_pan(Rio *vm, RioVal *a) { Voice *v = voice(a); (void)vm; if (v) { lock(1); v->pan = clampf(a[1].f, -1, 1); gains(v); lock(0); } }
+static void h_rate(rio_Vm *vm, rio_Val *a) { Voice *v = voice(a); (void)vm; if (v) { lock(1); stepfor(v, a[1].f); lock(0); } }
+static void h_volume(rio_Vm *vm, rio_Val *a) { Voice *v = voice(a); (void)vm; if (v) { lock(1); v->vol = clampf(a[1].f, 0, 1); gains(v); lock(0); } }
+static void h_pan(rio_Vm *vm, rio_Val *a) { Voice *v = voice(a); (void)vm; if (v) { lock(1); v->pan = clampf(a[1].f, -1, 1); gains(v); lock(0); } }
 /* soundLoop(voice, start, end): from end, go back to start (frames); end 0 or less: no loop */
-static void h_loop(Rio *vm, RioVal *a) {
+static void h_loop(rio_Vm *vm, rio_Val *a) {
   Voice *v = voice(a); (void)vm;
   if (!v) return;
   lock(1);
@@ -287,11 +287,11 @@ static void h_loop(Rio *vm, RioVal *a) {
   if (v->bits == 4 && v->loop1) { v->at0.at = 0xFFFFFFFFu; adpcm_to(v, &v->at0, v->loop0); } /* (the decoder at the loop's start) */
   lock(0);
 }
-static void h_stop(Rio *vm, RioVal *a) { Voice *v = voice(a); (void)vm; if (v) { lock(1); v->on = 0; lock(0); } }
-static void h_playing(Rio *vm, RioVal *a) { Voice *v = voice(a); (void)vm; a[0].i = v && v->on; }
+static void h_stop(rio_Vm *vm, rio_Val *a) { Voice *v = voice(a); (void)vm; if (v) { lock(1); v->on = 0; lock(0); } }
+static void h_playing(rio_Vm *vm, rio_Val *a) { Voice *v = voice(a); (void)vm; a[0].i = v && v->on; }
 
-int rim_audio_procs(Rio *vm) {
-  return rio_ffi(vm, "sound", "ibiif", h_sound) || rio_ffi(vm, "soundRate", "if", h_rate) || rio_ffi(vm, "soundVolume", "if", h_volume) ||
-         rio_ffi(vm, "soundPan", "if", h_pan) || rio_ffi(vm, "soundLoop", "iii", h_loop) || rio_ffi(vm, "soundStop", "i", h_stop) ||
-         rio_ffi(vm, "soundPlaying", "i>i", h_playing) || rio_ffi(vm, "soundWav", "ib>i", h_wav);
+int rim_audio_procs(rio_Vm *vm) {
+  return rio_addFfi(vm, "sound", "ibiif", h_sound) || rio_addFfi(vm, "soundRate", "if", h_rate) || rio_addFfi(vm, "soundVolume", "if", h_volume) ||
+         rio_addFfi(vm, "soundPan", "if", h_pan) || rio_addFfi(vm, "soundLoop", "iii", h_loop) || rio_addFfi(vm, "soundStop", "i", h_stop) ||
+         rio_addFfi(vm, "soundPlaying", "i>i", h_playing) || rio_addFfi(vm, "soundWav", "ib>i", h_wav);
 }

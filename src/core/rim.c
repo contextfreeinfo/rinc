@@ -22,18 +22,18 @@ static void init_palette(void) {
 }
 
 /* host procs: arguments arrive in a[], a result goes in a[0]. Drawing outside the screen is clipped */
-static void h_cls(Rio *v, RioVal *a) { (void)v; memset(rim_screen, (uint8_t)a[0].i, sizeof rim_screen); }
-static void h_pset(Rio *v, RioVal *a) {
+static void h_cls(rio_Vm *v, rio_Val *a) { (void)v; memset(rim_screen, (uint8_t)a[0].i, sizeof rim_screen); }
+static void h_pset(rio_Vm *v, rio_Val *a) {
   uint32_t x = a[0].u, y = a[1].u;
   (void)v;
   if (x < RIM_W && y < RIM_H) rim_screen[y][x] = (uint8_t)a[2].i;
 }
-static void h_pget(Rio *v, RioVal *a) {
+static void h_pget(rio_Vm *v, rio_Val *a) {
   uint32_t x = a[0].u, y = a[1].u;
   (void)v;
   a[0].i = x < RIM_W && y < RIM_H ? rim_screen[y][x] : 0;
 }
-static void h_rect(Rio *v, RioVal *a) {
+static void h_rect(rio_Vm *v, rio_Val *a) {
   int x0 = a[0].i, y0 = a[1].i, x1 = x0 + a[2].i, y1 = y0 + a[3].i, y;
   (void)v;
   if (x0 < 0) x0 = 0;
@@ -42,8 +42,8 @@ static void h_rect(Rio *v, RioVal *a) {
   if (y1 > RIM_H) y1 = RIM_H;
   for (y = y0; y < y1 && x0 < x1; y++) memset(&rim_screen[y][x0], (uint8_t)a[4].i, (size_t)(x1 - x0));
 }
-static void h_print(Rio *v, RioVal *a) { /* print(s, x, y, c): text at pixel x, y */
-  const char *s = (const char *)rio_ptr(v, a); int i, x = a[2].i, y = a[3].i;
+static void h_print(rio_Vm *v, rio_Val *a) { /* print(s, x, y, c): text at pixel x, y */
+  const char *s = (const char *)rio_sliceBytes(v, a); int i, x = a[2].i, y = a[3].i;
   if (!s) return;
   for (i = 0; i < a[1].i; i++, x += 6) rim_char((unsigned char)s[i], x, y, a[4].i & 255, -1);
 }
@@ -87,16 +87,16 @@ static int find_apps(void) {
     }
   return napps;
 }
-static void h_apps(Rio *v, RioVal *a) { (void)v; a[0].i = find_apps() < 0 ? 0 : napps; }
-static int copy_out(Rio *v, RioVal *out, const char *s, int n) {
-  char *p = (char *)rio_ptr(v, out); int cap = (int)out[1].u;
+static void h_apps(rio_Vm *v, rio_Val *a) { (void)v; a[0].i = find_apps() < 0 ? 0 : napps; }
+static int copy_out(rio_Vm *v, rio_Val *out, const char *s, int n) {
+  char *p = (char *)rio_sliceBytes(v, out); int cap = (int)out[1].u;
   if (p) memcpy(p, s, (size_t)(n < cap ? n : cap));
   return n;
 }
-static void h_app_name(Rio *v, RioVal *a) {
+static void h_app_name(rio_Vm *v, rio_Val *a) {
   a[0].i = a[0].u < (uint32_t)napps ? copy_out(v, a + 1, app_names[a[0].i], (int)strlen(app_names[a[0].i])) : 0;
 }
-static void h_app_info(Rio *v, RioVal *a) {
+static void h_app_info(rio_Vm *v, rio_Val *a) {
   char path[96], line[128]; int n = 0, i = 0, k = a[0].i;
   a[0].i = 0;
   if (k < 0 || k >= napps || !rim_fs) return;
@@ -109,15 +109,15 @@ static void h_app_info(Rio *v, RioVal *a) {
   for (k = i; k < n && line[k] != '\n' && line[k] != '\r'; k++) {}
   a[0].i = copy_out(v, a + 1, line + i, k - i);
 }
-static void h_launch(Rio *v, RioVal *a) {
-  const char *s = (const char *)rio_ptr(v, a); int n = (int)a[1].u;
+static void h_launch(rio_Vm *v, rio_Val *a) {
+  const char *s = (const char *)rio_sliceBytes(v, a); int n = (int)a[1].u;
   if (!s || n < 1 || n >= (int)sizeof rim_launch_name) return;
   memcpy(rim_launch_name, s, (size_t)n); rim_launch_name[n] = 0; rim_launch = 1;
 }
-static void h_open_console(Rio *v, RioVal *a) { (void)v; (void)a; rim_launch = 2; }
+static void h_open_console(rio_Vm *v, rio_Val *a) { (void)v; (void)a; rim_launch = 2; }
 void rim_text_esc(void) { int next = (thead + 1) % (int)sizeof typed; if (next != ttail) { typed[thead] = 27; thead = next; } }
-static void h_key(Rio *v, RioVal *a) { (void)v; if (ttail == thead) a[0].i = -1; else { a[0].i = typed[ttail]; ttail = (ttail + 1) % (int)sizeof typed; } }
-static void h_btn(Rio *v, RioVal *a) { (void)v; a[0].i = a[0].u < 16 ? rim_buttons >> a[0].i & 1 : 0; }
+static void h_key(rio_Vm *v, rio_Val *a) { (void)v; if (ttail == thead) a[0].i = -1; else { a[0].i = typed[ttail]; ttail = (ttail + 1) % (int)sizeof typed; } }
+static void h_btn(rio_Vm *v, rio_Val *a) { (void)v; a[0].i = a[0].u < 16 ? rim_buttons >> a[0].i & 1 : 0; }
 /* stick(i) -> Float: 0 the left stick's x, 1 its y, 2 and 3 the right one's; -1 to 1, + right and down,
    0 when it's near the middle (it gets there on its own only roughly). trigger(i) -> Float: 0 left, 1
    right; 0 to 1 */
@@ -128,15 +128,15 @@ static float stick_at(int i) {
   m = (m - DEAD) / (1 - DEAD);
   return v < 0 ? -(m > 1 ? 1 : m) : (m > 1 ? 1 : m);
 }
-static void h_stick(Rio *v, RioVal *a) { (void)v; a[0].f = a[0].u < 4 ? stick_at(a[0].i) : 0; }
-static void h_trigger(Rio *v, RioVal *a) { (void)v; a[0].f = a[0].u < 2 ? (float)rim_axes[4 + a[0].i] / 32767.0f : 0; }
-static void h_time(Rio *v, RioVal *a) { (void)v; a[0].f = rim_time ? rim_time() : 0; }
+static void h_stick(rio_Vm *v, rio_Val *a) { (void)v; a[0].f = a[0].u < 4 ? stick_at(a[0].i) : 0; }
+static void h_trigger(rio_Vm *v, rio_Val *a) { (void)v; a[0].f = a[0].u < 2 ? (float)rim_axes[4 + a[0].i] / 32767.0f : 0; }
+static void h_time(rio_Vm *v, rio_Val *a) { (void)v; a[0].f = rim_time ? rim_time() : 0; }
 /* fromHex(out, text): bytes from hex digits (pairs; anything else between them, such as spaces and
    line breaks, is skipped) into out, until it's full. Returns how many. For binary data typed into a
    cart: sound, pictures */
 static int hexdigit(int c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1; }
-static void h_fromhex(Rio *v, RioVal *a) {
-  uint8_t *out = (uint8_t *)rio_ptr(v, a); const char *t = (const char *)rio_ptr(v, a + 2);
+static void h_fromhex(rio_Vm *v, rio_Val *a) {
+  uint8_t *out = (uint8_t *)rio_sliceBytes(v, a); const char *t = (const char *)rio_sliceBytes(v, a + 2);
   uint32_t cap = a[1].u, n = a[3].u, i, k = 0; int hi = -1;
   for (i = 0; out && t && i < n && k < cap; i++) {
     int d = hexdigit(t[i]);
@@ -148,24 +148,24 @@ static void h_fromhex(Rio *v, RioVal *a) {
 
 static void log_line(void *ud, const char *s, int n) { (void)ud; rim_put(s, n); rim_put("\r\n", 2); }
 
-int rim_start(Rio *vm, void *mem, uint32_t memsize, void (*put)(const char *s, int n)) {
+int rim_start(rio_Vm *vm, void *mem, uint32_t memsize, void (*put)(const char *s, int n)) {
   rim_put = put;
   init_palette();
   if (rio_init(vm, mem, memsize, 0, 0)) return -1; /* no code buffer: the code goes in mem too */
   rim_audio_reset();
-  rio_set_log(vm, log_line, 0);
-  if (rio_ffi(vm, "cls", "i", h_cls) || rio_ffi(vm, "pset", "iii", h_pset) || rio_ffi(vm, "pget", "ii>i", h_pget) ||
-      rio_ffi(vm, "rect", "iiiii", h_rect) || rio_ffi(vm, "print", "siii", h_print) || rio_ffi(vm, "btn", "i>i", h_btn) || rim_audio_procs(vm) || rio_ffi(vm, "time", ">f", h_time) ||
-      rio_ffi(vm, "fromHex", "bs>i", h_fromhex) || rio_ffi(vm, "stick", "i>f", h_stick) || rio_ffi(vm, "trigger", "i>f", h_trigger) ||
-      rio_ffi(vm, "key", ">i", h_key) || rio_ffi(vm, "apps", ">i", h_apps) || rio_ffi(vm, "appName", "ib>i", h_app_name) ||
-      rio_ffi(vm, "appInfo", "ib>i", h_app_info) || rio_ffi(vm, "launch", "s", h_launch) || rio_ffi(vm, "openConsole", "", h_open_console)) return -1;
+  rio_setLog(vm, log_line, 0);
+  if (rio_addFfi(vm, "cls", "i", h_cls) || rio_addFfi(vm, "pset", "iii", h_pset) || rio_addFfi(vm, "pget", "ii>i", h_pget) ||
+      rio_addFfi(vm, "rect", "iiiii", h_rect) || rio_addFfi(vm, "print", "siii", h_print) || rio_addFfi(vm, "btn", "i>i", h_btn) || rim_audio_procs(vm) || rio_addFfi(vm, "time", ">f", h_time) ||
+      rio_addFfi(vm, "fromHex", "bs>i", h_fromhex) || rio_addFfi(vm, "stick", "i>f", h_stick) || rio_addFfi(vm, "trigger", "i>f", h_trigger) ||
+      rio_addFfi(vm, "key", ">i", h_key) || rio_addFfi(vm, "apps", ">i", h_apps) || rio_addFfi(vm, "appName", "ib>i", h_app_name) ||
+      rio_addFfi(vm, "appInfo", "ib>i", h_app_info) || rio_addFfi(vm, "launch", "s", h_launch) || rio_addFfi(vm, "openConsole", "", h_open_console)) return -1;
   thead = ttail = tesc = 0;
   return 0;
 }
 
 /* a game's frame: update then draw */
-int rim_frame(Rio *vm) {
-  int u = rio_func(vm, "update"), d = rio_func(vm, "draw");
+int rim_frame(rio_Vm *vm) {
+  int u = rio_findProc(vm, "update"), d = rio_findProc(vm, "draw");
   /* the left stick pushed well over also counts as the arrows, as on PICO-8 */
   if (rim_axes[0] < -16000) rim_buttons |= RIM_LEFT;
   if (rim_axes[0] > 16000) rim_buttons |= RIM_RIGHT;
@@ -177,12 +177,12 @@ int rim_frame(Rio *vm) {
   return 0;
 }
 
-#ifndef RIO_NO_COMPILER /* (a vm that only runs images has no REPL) */
+#ifndef rio_NO_COMPILER /* (a vm that only runs images has no REPL) */
 /* the REPL: lines gather until rio has a complete input; a blank line gives up on an unfinished one.
    The line being typed can be edited anywhere: left and right, Home and End (or Ctrl-A, Ctrl-E),
    Backspace and Delete, and up and down go back through the lines typed before. It's in a little
    color as it's typed: keywords, constants (numbers and strings), comments. Each next line of an unfinished input starts
-   indented (two spaces a step, as rio_repl_indent says), end, else and case go a step back out once
+   indented (two spaces a step, as rio_replIndent says), end, else and case go a step back out once
    typed, and Backspace in the indent takes a step.
    Keys arrive as a terminal sends them (ESC [ A and so on: the keyboard sends the same), and the echo
    is in terminal escapes too, which the console understands, so a serial terminal and the screen show
@@ -213,7 +213,7 @@ static void move_left(RimRepl *r, int k) { char b[16]; if (k > 0) r->put(b, snpr
 static void paint_line(RimRepl *r) {
   int i = r->line0, j;
   puts_(r, PAINT_PLAIN); /* (from whatever color the cursor was last in: a comment's, say) */
-  r->mode = rio_repl_indent(r->acc, (uint32_t)r->line0) < 0 ? MODE_STRING : MODE_PLAIN; r->word = -1; r->numdot = -1;
+  r->mode = rio_replIndent(r->acc, (uint32_t)r->line0) < 0 ? MODE_STRING : MODE_PLAIN; r->word = -1; r->numdot = -1;
   if (r->mode == MODE_STRING) puts_(r, PAINT_STRING);
   while (i < r->n) {
     char c = r->acc[i];
@@ -283,7 +283,7 @@ static void append_tail(RimRepl *r, char c) { append(r, c); } /* (append again, 
 /* the next line's indent, two spaces a step. Spaces typed at its start take its place first (so
    typed or pasted indenting doesn't double it) */
 static void indent(RimRepl *r) {
-  int k = rio_repl_indent(r->acc, (uint32_t)r->n) * 2;
+  int k = rio_replIndent(r->acc, (uint32_t)r->n) * 2;
   r->autoind = 0;
   while (k-- > 0 && r->n < (int)sizeof r->acc - 2) { append(r, ' '); r->autoind++; }
 }
@@ -294,7 +294,7 @@ static void outdent(RimRepl *r) {
   while (s < r->n && r->acc[s] == ' ') s++;
   w = r->n - s;
   for (i = s; i < r->n; i++) if (r->acc[i] == ' ') return;
-  if (s - r->line0 < 2 || !w || !rio_repl_outdent(r->acc + s, (uint32_t)w)) return;
+  if (s - r->line0 < 2 || !w || !rio_replOutdent(r->acc + s, (uint32_t)w)) return;
   memmove(r->acc + s - 2, r->acc + s, (size_t)w); r->n -= 2; r->cur = r->n;
   redraw(r);
 }
@@ -330,10 +330,10 @@ static void recall(RimRepl *r, int dir) { /* dir 1: older, -1: newer */
   }
 }
 
-int rim_repl_begin(RimRepl *r, Rio *vm, void *scratch, uint32_t size) {
+int rim_repl_begin(RimRepl *r, rio_Vm *vm, void *scratch, uint32_t size) {
   memset(r, 0, sizeof *r);
   r->vm = vm; r->put = rim_put; r->echo = 1; r->word = -1; r->numdot = -1;
-  if (rio_repl_begin(vm, scratch, size, 0)) return -1;
+  if (rio_replBegin(vm, scratch, size, 0)) return -1;
   r->put("Rim: rio REPL\r\n", 15);
   prompt(r);
   return 0;
@@ -477,8 +477,8 @@ void rim_repl_char(RimRepl *r, int c) {
     if (command(r)) { r->n = 0; new_line(r); if (!r->saving && !r->run) prompt(r); return; }
     if (r->n >= (int)sizeof r->acc - 1) { r->put("(input too long)\r\n", 18); r->n = 0; new_line(r); prompt(r); return; }
     r->acc[r->n++] = '\n';
-    res = rio_repl_eval(r->vm, r->acc, (uint32_t)r->n);
-    if (res == RIO_MORE) { new_line(r); prompt(r); indent(r); return; }
+    res = rio_replEval(r->vm, r->acc, (uint32_t)r->n);
+    if (res == rio_ReplResult_more) { new_line(r); prompt(r); indent(r); return; }
     if (res < 0) { const char *e = rio_error(r->vm); r->errors++; r->put(e, (int)strlen(e)); r->put("\r\n", 2); }
     r->n = 0; new_line(r);
     prompt(r);

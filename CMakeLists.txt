@@ -46,10 +46,10 @@ if(NOT MSVC)
 endif()
 
 if(RIM_PLATFORM STREQUAL rp2350)
-  target_compile_definitions(riocore PUBLIC RIO_SMALL RIO_MAX_FFI=64) # MCU-sized fixed caps, but room for Rim's host procs
+  target_compile_definitions(riocore PUBLIC rio_SMALL rio_MAX_FFI=64) # MCU-sized fixed caps, but room for Rim's host procs
   option(RIM_RIO_IN_RAM "run rio's interpreter loop from SRAM instead of flash" ON)
   if(RIM_RIO_IN_RAM)
-    target_compile_definitions(riocore PRIVATE RIO_HOT_SECTION=".time_critical.rio")
+    target_compile_definitions(riocore PRIVATE rio_HOT_SECTION=".time_critical.rio")
   endif()
   target_compile_definitions(rimcore PRIVATE RIM_HOT_SECTION=".time_critical.rim") # the sound mixer, in RAM
   # video.c: HDMI out through the HSTX, on core 1. keyboard.c: TinyUSB's host stack over PIO-USB, its

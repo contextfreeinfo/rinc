@@ -5,7 +5,7 @@
      -frames n                 instead of a window, run n frames (Z held for the first few)
      -o screen.ppm             instead of a window, afterwards write the screen as an image
      -wav sound.wav            with -frames: the sound those frames made, as a WAV file
-     -i cart.img               compile to an image (see rio_image_load) instead, and list the host
+     -i cart.img               compile to an image (see rio_loadImage) instead, and list the host
                                procs its code calls (tools/web.py uses both)
      -export game[.exe]        a copy of this rim with the cart in it, compiled: it runs the cart
                                (with the options above, too), so it's a game to hand out
@@ -21,6 +21,7 @@
 #include <string.h>
 #include <time.h>
 #include "rim.h"
+#include "internal.h" /* (rio's instruction set, for -i's list of host procs) */
 #ifdef _WIN32
 __declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(void *module, char *name, unsigned long size);
 #else
@@ -34,10 +35,10 @@ __declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(void *module, c
 #include <SDL3/SDL_main.h>
 #endif
 
-static uint8_t rio_mem[256 << 10], repl_scratch[1 << 18], image[512 << 10];
+static uint8_t app_space[256 << 10], repl_scratch[1 << 18], image[512 << 10];
 static int16_t wav[RIM_RATE * 2 * 60]; /* -wav: up to a minute */
 static char src[1 << 20];
-static Rio vm;
+static rio_Vm vm;
 static RimRepl repl;
 static clock_t t0;
 
@@ -60,14 +61,12 @@ static int save_ppm(const char *path) { /* the screen through the palette, as 8-
 
 /* the cart compiled, as an image in image[]: its size, or 0 after reporting why not. list: print the
    host procs its code calls, one per line */
-#define OPENUM(o) OP_##o,
-enum { RIO_OPS(OPENUM) OP_COUNT };
 static uint32_t make_image(const char *cart, size_t n, int list) {
-  uint32_t size, pc; uint8_t used[RIO_MAX_FFI] = {0}; int k;
+  uint32_t size, pc; uint8_t used[rio_MAX_FFI] = {0}; int k;
   if (rio_compile(&vm, src, (uint32_t)n)) { fprintf(stderr, "%s:%s\n", cart, rio_error(&vm)); return 0; }
-  for (pc = 0; pc < vm.pc; pc++) if (vm.code[pc].op == OP_FFI && vm.code[pc].c < RIO_MAX_FFI) used[vm.code[pc].c] = 1;
-  for (k = 0; list && k < vm.nffi; k++) if (used[k]) printf("host %s\n", vm.ffi[k].name);
-  if (!(size = rio_image_save(&vm, image, sizeof image))) fprintf(stderr, "rim: can't make an image\n");
+  for (pc = 0; pc < vm.codeLen; pc++) if (vm.code[pc].op == rio_Op_ffi && vm.code[pc].c < rio_MAX_FFI) used[vm.code[pc].c] = 1;
+  for (k = 0; list && k < vm.ffiCount; k++) if (used[k]) printf("host %s\n", vm.ffi[k].name);
+  if (!(size = rio_saveImage(&vm, image, sizeof image))) fprintf(stderr, "rim: can't make an image\n");
   return size;
 }
 static int write_file(const char *path, const void *a, size_t an, const void *b, size_t bn, const void *c, size_t cn) {
@@ -281,7 +280,7 @@ int main(int argc, char **argv) {
     else cart = argv[i];
   }
   t0 = clock(); rim_time = now;
-  if (rim_start(&vm, rio_mem, sizeof rio_mem, put)) { fprintf(stderr, "rim: can't start\n"); return 1; }
+  if (rim_start(&vm, app_space, sizeof app_space, put)) { fprintf(stderr, "rim: can't start\n"); return 1; }
   if (!cart) { /* an exported game: the cart it carries */
     size_t n; char *self = self_file(&n);
     if (self && (size = carried(self, n))) memcpy(image, self + n - 12 - size, size);
@@ -300,8 +299,8 @@ int main(int argc, char **argv) {
         return web ? export_web(web, cart, size) : 0;
       }
       if (rio_compile(&vm, src, (uint32_t)n)) { fprintf(stderr, "%s:%s\n", cart, rio_error(&vm)); return 1; }
-    } else if (rio_image_load(&vm, image, size)) { fprintf(stderr, "%s: %s\n", cart, rio_error(&vm)); return 1; }
-    if (rio_run(&vm) || ((fn = rio_func(&vm, "main")) >= 0 && rio_call(&vm, fn))) {
+    } else if (rio_loadImage(&vm, image, size)) { fprintf(stderr, "%s: %s\n", cart, rio_error(&vm)); return 1; }
+    if (rio_run(&vm) || ((fn = rio_findProc(&vm, "main")) >= 0 && rio_call(&vm, fn))) {
       fflush(stdout); fprintf(stderr, "%s:%s\n", cart, rio_error(&vm)); return 1;
     }
 #if RIM_SDL
