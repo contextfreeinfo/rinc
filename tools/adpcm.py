@@ -1,11 +1,11 @@
-"""Sound into IMA ADPCM, the 4-bit format Rim's voices play: a quarter the size of 16-bit.
+"""Sound into IMA ADPCM, the 4-bit format Rinc's voices play: a quarter the size of 16-bit.
 
   python tools/adpcm.py in.wav out.wav       an ADPCM WAV file (for soundWav)
   python tools/adpcm.py in.wav out.rio       rio source: the sound as hex (for fromHex), and how to play it
   python tools/adpcm.py --tone out.rio       a test sound instead of a file: a plucked chord
 
 in.wav is 16-bit PCM, mono or stereo, at any rate. Blocks are 256 bytes a channel (505 frames), as
-Rim's sound(voice, data, 4, channels, rate) expects. The coding is IMA's, as in WAV files (format 0x11).
+Rinc's sound(voice, data, 4, channels, rate) expects. The coding is IMA's, as in WAV files (format 0x11).
 """
 import math, struct, sys, wave
 
@@ -19,7 +19,7 @@ BLOCK = 256  # bytes a channel
 PER = (BLOCK - 4) * 2 + 1  # frames a block
 
 def code_for(sample, pred, index):
-  """the 4-bit code that gets closest to sample, and the decoder's state after it (exactly as Rim decodes)"""
+  """the 4-bit code that gets closest to sample, and the decoder's state after it (exactly as Rinc decodes)"""
   step = STEPS[index]
   diff = sample - pred
   code = 8 if diff < 0 else 0

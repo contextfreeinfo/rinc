@@ -8,103 +8,103 @@
    so the PICO-8 colors by number; 0 or 39 back to the text color), ESC [ n D and C cursor left and right (left wraps back a row: long lines wrap), ESC [ K
    blanks the rest of the row, ESC [ J that and the rows below. Others are ignored. */
 #include <string.h>
-#include "rim.h"
+#include "rinc.h"
 
-#define CW 6
-#define CH 9
-#define COLS (RIM_W / CW)
-#define ROWS (RIM_H / CH)
-#define X0 ((RIM_W - COLS * CW) / 2) /* (1: the padding) */
-#define Y0 X0
-#define CURSOR 10 /* yellow: clear on the dark blue, and apart from the text and highlighting colors */
+#define rinc_CW 6
+#define rinc_CH 9
+#define rinc_COLS (rinc_W / rinc_CW)
+#define rinc_ROWS (rinc_H / rinc_CH)
+#define rinc_X0 ((rinc_W - rinc_COLS * rinc_CW) / 2) /* (1: the padding) */
+#define rinc_Y0 rinc_X0
+#define rinc_CURSOR 10 /* yellow: clear on the dark blue, and apart from the text and highlighting colors */
 
-static int cx, cy, shown; /* shown: the cursor is drawn */
-uint8_t rim_text_fg = 7, rim_text_bg = 0;
-static uint8_t ink = 7, under[CH]; /* ink: color now; under: the pixels beneath the cursor */
-static int esc; /* escapes: 0 none, 1 ESC seen, 2 in ESC [ */
+static int rinc_cx, rinc_cy, rinc_shown; /* shown: the cursor is drawn */
+uint8_t rinc_textFg = 7, rinc_textBg = 0;
+static uint8_t rinc_ink = 7, rinc_under[rinc_CH]; /* ink: color now; under: the pixels beneath the cursor */
+static int rinc_esc; /* escapes: 0 none, 1 ESC seen, 2 in ESC [ */
 /* ANSI colors 0-7 (30-37) and bright (90-97), as their nearest PICO-8 colors: black, red, green,
    yellow, blue, pink (for magenta), blue (for cyan), light gray; bright: dark gray, red, green,
    yellow, blue, pink, blue, white */
-static const uint8_t ansi[16] = {0, 8, 11, 10, 12, 14, 12, 6, 5, 8, 11, 10, 12, 14, 12, 7};
-static int escp[3], nescp; /* an escape's numbers so far */
+static const uint8_t rinc_ansi[16] = {0, 8, 11, 10, 12, 14, 12, 6, 5, 8, 11, 10, 12, 14, 12, 7};
+static int rinc_escp[3], rinc_nescp; /* an escape's numbers so far */
 
 /* character c at pixel x, y, in fg; bg < 0 leaves the cell's other pixels alone */
-void rim_char(int c, int x, int y, int fg, int bg) {
-  const uint8_t *g = c > 32 && c < 127 ? rim_font[c - 32] : rim_font[0];
+void rinc_char(int c, int x, int y, int fg, int bg) {
+  const uint8_t *g = c > 32 && c < 127 ? rinc_font[c - 32] : rinc_font[0];
   int r, k;
-  for (r = 0; r < CH; r++) {
+  for (r = 0; r < rinc_CH; r++) {
     int py = y + r, bits = r < 8 ? g[r] : 0;
-    if (py < 0 || py >= RIM_H) continue;
-    for (k = 0; k < CW; k++) {
+    if (py < 0 || py >= rinc_H) continue;
+    for (k = 0; k < rinc_CW; k++) {
       int px = x + k;
-      if (px < 0 || px >= RIM_W) continue;
-      if (bits >> k & 1) rim_screen[py][px] = (uint8_t)fg;
-      else if (bg >= 0) rim_screen[py][px] = (uint8_t)bg;
+      if (px < 0 || px >= rinc_W) continue;
+      if (bits >> k & 1) rinc_screen[py][px] = (uint8_t)fg;
+      else if (bg >= 0) rinc_screen[py][px] = (uint8_t)bg;
     }
   }
 }
 
-static void cursor(int on) { /* a line in its own color, with the pixels beneath kept */
-  int r, x = X0 + cx * CW - 1;
-  if (on == shown) return;
-  for (r = 0; r < CH - 1 && x >= 0; r++) { /* (as tall as the glyphs: the cell's last row is the gap below) */
-    uint8_t *p = &rim_screen[Y0 + cy * CH + r][x];
-    if (on) { under[r] = *p; *p = CURSOR; } else *p = under[r];
+static void rinc_cursor(int on) { /* a line in its own color, with the pixels beneath kept */
+  int r, x = rinc_X0 + rinc_cx * rinc_CW - 1;
+  if (on == rinc_shown) return;
+  for (r = 0; r < rinc_CH - 1 && x >= 0; r++) { /* (as tall as the glyphs: the cell's last row is the gap below) */
+    uint8_t *p = &rinc_screen[rinc_Y0 + rinc_cy * rinc_CH + r][x];
+    if (on) { rinc_under[r] = *p; *p = rinc_CURSOR; } else *p = rinc_under[r];
   }
-  shown = on;
+  rinc_shown = on;
 }
-static void blank_row_from(int x, int y) { int r; for (r = 0; r < CH; r++) memset(&rim_screen[Y0 + y * CH + r][X0 + x * CW], rim_text_bg, (size_t)(COLS - x) * CW); }
-static void escape(int c) { /* the end of ESC [ n ; ... c */
-  int n = escp[0], y;
+static void rinc_blankRowFrom(int x, int y) { int r; for (r = 0; r < rinc_CH; r++) memset(&rinc_screen[rinc_Y0 + y * rinc_CH + r][rinc_X0 + x * rinc_CW], rinc_textBg, (size_t)(rinc_COLS - x) * rinc_CW); }
+static void rinc_escape(int c) { /* the end of ESC [ n ; ... c */
+  int n = rinc_escp[0], y;
   if (c == 'm') {
-    if (n == 38 && nescp == 3 && escp[1] == 5) ink = (uint8_t)escp[2];
-    else if (n == 0 || n == 39) ink = rim_text_fg;
-    else if (n >= 30 && n <= 37) ink = ansi[n - 30];
-    else if (n >= 90 && n <= 97) ink = ansi[n - 90 + 8];
+    if (n == 38 && rinc_nescp == 3 && rinc_escp[1] == 5) rinc_ink = (uint8_t)rinc_escp[2];
+    else if (n == 0 || n == 39) rinc_ink = rinc_textFg;
+    else if (n >= 30 && n <= 37) rinc_ink = rinc_ansi[n - 30];
+    else if (n >= 90 && n <= 97) rinc_ink = rinc_ansi[n - 90 + 8];
   } else if (c == 'D') {
-    for (n = n ? n : 1; n > 0; n--) { if (cx > 0) cx--; else if (cy > 0) { cy--; cx = COLS - 1; } }
+    for (n = n ? n : 1; n > 0; n--) { if (rinc_cx > 0) rinc_cx--; else if (rinc_cy > 0) { rinc_cy--; rinc_cx = rinc_COLS - 1; } }
   } else if (c == 'C') {
-    for (n = n ? n : 1; n > 0; n--) { if (cx < COLS - 1) cx++; else if (cy < ROWS - 1) { cy++; cx = 0; } }
-  } else if (c == 'K') blank_row_from(cx, cy);
-  else if (c == 'J') { blank_row_from(cx, cy); for (y = cy + 1; y < ROWS; y++) blank_row_from(0, y); }
+    for (n = n ? n : 1; n > 0; n--) { if (rinc_cx < rinc_COLS - 1) rinc_cx++; else if (rinc_cy < rinc_ROWS - 1) { rinc_cy++; rinc_cx = 0; } }
+  } else if (c == 'K') rinc_blankRowFrom(rinc_cx, rinc_cy);
+  else if (c == 'J') { rinc_blankRowFrom(rinc_cx, rinc_cy); for (y = rinc_cy + 1; y < rinc_ROWS; y++) rinc_blankRowFrom(0, y); }
 }
 
-static void newline(void) {
-  cx = 0;
-  if (++cy < ROWS) return;
-  cy = ROWS - 1;
-  memmove(rim_screen[0], rim_screen[CH], (size_t)(RIM_H - CH) * RIM_W);
-  memset(rim_screen[Y0 + (ROWS - 1) * CH], rim_text_bg, (size_t)(RIM_H - Y0 - (ROWS - 1) * CH) * RIM_W); /* (the last row, and the padding below) */
+static void rinc_newline(void) {
+  rinc_cx = 0;
+  if (++rinc_cy < rinc_ROWS) return;
+  rinc_cy = rinc_ROWS - 1;
+  memmove(rinc_screen[0], rinc_screen[rinc_CH], (size_t)(rinc_H - rinc_CH) * rinc_W);
+  memset(rinc_screen[rinc_Y0 + (rinc_ROWS - 1) * rinc_CH], rinc_textBg, (size_t)(rinc_H - rinc_Y0 - (rinc_ROWS - 1) * rinc_CH) * rinc_W); /* (the last row, and the padding below) */
 }
 
-void rim_console_put(const char *s, int n) {
-  cursor(0);
+void rinc_consolePut(const char *s, int n) {
+  rinc_cursor(0);
   while (n-- > 0) {
     int c = (unsigned char)*s++;
-    if (esc == 1) { esc = c == '[' ? 2 : 0; escp[0] = escp[1] = escp[2] = 0; nescp = 1; continue; }
-    if (esc == 2) {
-      if (c >= '0' && c <= '9') escp[nescp - 1] = escp[nescp - 1] * 10 + c - '0';
-      else if (c == ';') { if (nescp < 3) nescp++; }
-      else { escape(c); esc = 0; }
+    if (rinc_esc == 1) { rinc_esc = c == '[' ? 2 : 0; rinc_escp[0] = rinc_escp[1] = rinc_escp[2] = 0; rinc_nescp = 1; continue; }
+    if (rinc_esc == 2) {
+      if (c >= '0' && c <= '9') rinc_escp[rinc_nescp - 1] = rinc_escp[rinc_nescp - 1] * 10 + c - '0';
+      else if (c == ';') { if (rinc_nescp < 3) rinc_nescp++; }
+      else { rinc_escape(c); rinc_esc = 0; }
       continue;
     }
-    if (c == 27) { esc = 1; continue; }
-    if (c == '\n') newline();
-    else if (c == '\r') cx = 0;
-    else if (c == '\b') { if (cx > 0) cx--; }
+    if (c == 27) { rinc_esc = 1; continue; }
+    if (c == '\n') rinc_newline();
+    else if (c == '\r') rinc_cx = 0;
+    else if (c == '\b') { if (rinc_cx > 0) rinc_cx--; }
     else if (c >= 32) {
-      if (cx >= COLS) newline();
-      rim_char(c, X0 + cx * CW, Y0 + cy * CH, ink, rim_text_bg);
-      cx++;
+      if (rinc_cx >= rinc_COLS) rinc_newline();
+      rinc_char(c, rinc_X0 + rinc_cx * rinc_CW, rinc_Y0 + rinc_cy * rinc_CH, rinc_ink, rinc_textBg);
+      rinc_cx++;
     }
   }
-  if (cx >= COLS) newline();
-  cursor(1);
+  if (rinc_cx >= rinc_COLS) rinc_newline();
+  rinc_cursor(1);
 }
 
-void rim_console_clear(int bg) {
-  rim_text_bg = (uint8_t)bg; ink = rim_text_fg; esc = 0;
-  memset(rim_screen, bg, sizeof rim_screen);
-  cx = cy = 0; shown = 0;
-  cursor(1);
+void rinc_consoleClear(int bg) {
+  rinc_textBg = (uint8_t)bg; rinc_ink = rinc_textFg; rinc_esc = 0;
+  memset(rinc_screen, bg, sizeof rinc_screen);
+  rinc_cx = rinc_cy = 0; rinc_shown = 0;
+  rinc_cursor(1);
 }

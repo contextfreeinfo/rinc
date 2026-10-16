@@ -1,11 +1,11 @@
-/* Xbox controllers (gamepad.c): player 1's buttons (as rim_buttons' bits) and Xbox button, read with
-   rim_pad_read; rim_axes too */
-#ifndef RIM_GAMEPAD_H
-#define RIM_GAMEPAD_H
+/* Xbox controllers (gamepad.c): player 1's buttons (as rinc_buttons' bits) and Xbox button, read with
+   rinc_padRead; rinc_axes too */
+#ifndef rinc_GAMEPAD_H
+#define rinc_GAMEPAD_H
 #include <stdint.h>
-extern uint16_t rim_pad_buttons;
-extern uint8_t rim_pad_guide, rim_pad_count;
-void rim_pad_notes(void (*note)(const char *fmt, unsigned a, unsigned b, unsigned c));
-void rim_pad_task(void); /* with tuh_task */
-void rim_pad_read(void); /* before a frame */
+extern uint16_t rinc_padButtons;
+extern uint8_t rinc_padGuide, rinc_padCount;
+void rinc_padNotes(void (*note)(const char *fmt, unsigned a, unsigned b, unsigned c));
+void rinc_padTask(void); /* with tuh_task */
+void rinc_padRead(void); /* before a frame */
 #endif

@@ -1,7 +1,7 @@
 # /// script
 # dependencies = ["pyserial"]
 # ///
-"""Send a cart to Rim's REPL over USB serial and start it, or save it to the board's SD card.
+"""Send a cart to Rinc's REPL over USB serial and start it, or save it to the board's SD card.
 
   uv run tools/send.py carts/bounce.rio [COM3] [--no-run]     (uv fetches pyserial)
   uv run tools/send.py carts/bounce.rio [COM3] --save         to /rinc/apps/bounce/bounce.rio

@@ -32,7 +32,7 @@ canvas { position: absolute; inset: 0; margin: auto; image-rendering: pixelated;
   if (ex.start(cart.length)) { draw(); fail(ex.error()); return; }
   // sound: an AudioWorklet plays what the wasm mixes, kept about 60 ms ahead of the audio clock.
   // Browsers start sound only after a key or a click; until then a frame's sound is mixed and dropped
-  const worklet = `class Rim extends AudioWorkletProcessor {
+  const worklet = `class Rinc extends AudioWorkletProcessor {
     constructor() { super(); this.q = []; this.at = 0; this.port.onmessage = e => this.q.push(e.data); }
     process(inputs, outputs) {
       const l = outputs[0][0], r = outputs[0][1]; let i = 0;
@@ -45,14 +45,14 @@ canvas { position: absolute; inset: 0; margin: auto; image-rendering: pixelated;
       return true;
     }
   }
-  registerProcessor("rim", Rim);`;
+  registerProcessor("rinc", Rinc);`;
   let audio = null, node = null, sent = 0;
   const mixed = n => { const s = new Int16Array(ex.memory.buffer, ex.mix(n), n * 2), f = new Float32Array(n * 2); for (let i = 0; i < f.length; i++) f[i] = s[i] / 32768; return f; };
   const startAudio = async () => {
     if (audio) return;
     audio = new AudioContext({ sampleRate: 48000 });
     await audio.audioWorklet.addModule(URL.createObjectURL(new Blob([worklet], { type: "text/javascript" })));
-    node = new AudioWorkletNode(audio, "rim", { outputChannelCount: [2] });
+    node = new AudioWorkletNode(audio, "rinc", { outputChannelCount: [2] });
     node.connect(audio.destination);
     sent = Math.floor(audio.currentTime * 48000);
   };
@@ -67,7 +67,7 @@ canvas { position: absolute; inset: 0; margin: auto; image-rendering: pixelated;
   // btn: arrows, then A (V), B (C), X (X), Y (Z)
   const keys = { ArrowLeft: 1, ArrowRight: 2, ArrowUp: 4, ArrowDown: 8, KeyV: 16, KeyC: 32, KeyX: 64, KeyZ: 128 };
   let buttons = 0, next = performance.now(), game = true;
-  // a controller, in the browser's standard layout (Xbox's): its buttons as Rim's, sticks and triggers
+  // a controller, in the browser's standard layout (Xbox's): its buttons as Rinc's, sticks and triggers
   const padBits = [16, 32, 64, 128, 256, 512, 0, 0, 8192, 4096, 1024, 2048, 4, 8, 1, 2];
   const gamepad = () => {
     const p = [...(navigator.getGamepads ? navigator.getGamepads() : [])].find(g => g && g.mapping === "standard");

@@ -1,5 +1,5 @@
-# The carts as web pages, on GitHub Pages: each push to main builds the web player and a headless rim,
-# makes a page of each cart (rim -web), and an index linking them, from each cart's first comment line.
+# The carts as web pages, on GitHub Pages: each push to main builds the web player and a headless rinc,
+# makes a page of each cart (rinc -web), and an index linking them, from each cart's first comment line.
 name: pages
 
 on:
@@ -26,10 +26,10 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.15.2
-      - name: Build the web player and a headless rim
+      - name: Build the web player and a headless rinc
         run: |
-          python3 tools/web.py --wasm=rim.wasm
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DRIM_PLATFORM=desktop -DRIM_SDL=OFF -DRIM_WEB_WASM=rim.wasm
+          python3 tools/web.py --wasm=rinc.wasm
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DRINC_PLATFORM=desktop -DRINC_SDL=OFF -DRINC_WEB_WASM=rinc.wasm
           cmake --build build --parallel
       - name: Make the pages
         run: |
@@ -44,7 +44,7 @@ jobs:
             for cart in carts/*.rio; do
               name=$(basename "$cart" .rio)
               case $name in bench|micro) continue;; esac # (timings, not demos)
-              build/rim "$cart" -web "site/$name.html"
+              build/rinc "$cart" -web "site/$name.html"
               about=$(head -1 "$cart" | sed -e 's/^# *//' -e 's/&/\&amp;/g' -e 's/</\&lt;/g')
               echo "<li><a href=\"$name.html\">$name</a>: $about</li>"
             done
