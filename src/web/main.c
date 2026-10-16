@@ -1,6 +1,6 @@
 /* Rim in a browser, as wasm: the page (tools/web.py makes it) hands over a cart, then calls frame()
    60 times a second and draws the screen. Imports from the page: put (text out), now (seconds).
-   No emscripten: plain clang/zig wasm32, with only the C library rio needs. Built with RIO_NO_COMPILER,
+   No emscripten: plain clang/zig wasm32, with only the C library rio needs. Built with rio_NO_COMPILER,
    the cart is an image (made by rim -i), and the wasm is a quarter the size; otherwise it's source. */
 #include "rim.h"
 
@@ -8,9 +8,9 @@
 __attribute__((import_module("env"), import_name("put"))) extern void js_put(const char *s, int n);
 __attribute__((import_module("env"), import_name("now"))) extern float js_now(void);
 
-static _Alignas(16) uint8_t rio_mem[256 << 10]; /* the same app space as on the board */
+static _Alignas(16) uint8_t app_space[256 << 10]; /* the same app space as on the board */
 static char src[128 << 10]; /* the cart: its source, or its image */
-static Rio vm;
+static rio_Vm vm;
 static uint32_t rgba[RIM_W * RIM_H];
 static int16_t sound[2048 * 2];
 
@@ -21,13 +21,13 @@ EXPORT(source) char *source(void) { return src; }
 EXPORT(start) int start(int len) {
   int fn;
   rim_time = js_now;
-  if (rim_start(&vm, rio_mem, sizeof rio_mem, put)) return -1;
-#ifdef RIO_NO_COMPILER
-  if (rio_image_load(&vm, src, (uint32_t)len) || rio_run(&vm)) return -1;
+  if (rim_start(&vm, app_space, sizeof app_space, put)) return -1;
+#ifdef rio_NO_COMPILER
+  if (rio_loadImage(&vm, src, (uint32_t)len) || rio_run(&vm)) return -1;
 #else
   if (rio_compile(&vm, src, (uint32_t)len) || rio_run(&vm)) return -1;
 #endif
-  return (fn = rio_func(&vm, "main")) >= 0 ? rio_call(&vm, fn) : 0;
+  return (fn = rio_findProc(&vm, "main")) >= 0 ? rio_call(&vm, fn) : 0;
 }
 /* a frame with these buttons held: 0, 1 (not a game), -1 (error) */
 EXPORT(frame) int frame(int buttons) { rim_buttons = (uint16_t)buttons; return rim_frame(&vm); }

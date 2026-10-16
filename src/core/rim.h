@@ -30,10 +30,10 @@ enum { RIM_LEFT = 1, RIM_RIGHT = 2, RIM_UP = 4, RIM_DOWN = 8, RIM_A = 16, RIM_B 
 /* set up rio in the given memory (the app space: code and data both live there), with log output
    going to put and the host procs carts call: cls(c), pset(x, y, c), pget(x, y) -> c,
    rect(x, y, w, h, c), print(s, x, y, c), btn(i) -> Int (1 held), time() -> Float */
-int rim_start(Rio *vm, void *mem, uint32_t memsize, void (*put)(const char *s, int n));
+int rim_start(rio_Vm *vm, void *mem, uint32_t memsize, void (*put)(const char *s, int n));
 /* one frame of a game: the cart's update* and then draw* (each optional). 0: ran, 1: the cart has
    neither (it isn't a game), -1: a runtime error (rio_error says) */
-int rim_frame(Rio *vm);
+int rim_frame(rio_Vm *vm);
 
 /* sound (audio.c): RIM_VOICES voices mixed to RIM_RATE frames a second of 16-bit stereo. Host procs:
    sound(voice, data, bits, channels, rate), soundRate(voice, rate), soundVolume(voice, 0..1),
@@ -54,7 +54,7 @@ void rim_audio_reset(void); /* every voice stops */
 void rim_audio_volume(int step); /* the system volume: +1 or -1 steps (2.5 dB), 0 to mute or unmute */
 int rim_audio_level(void);       /* 0 to RIM_VOLUME_STEPS (full), or -1 muted */
 extern void (*rim_audio_lock)(int on);
-int rim_audio_procs(Rio *vm);
+int rim_audio_procs(rio_Vm *vm);
 
 /* text: the 5x8 font (ASCII 32-126, bit 0 leftmost) in 6x9 cells, and a console of 53x26 of them
    that scrolls the screen (console.c) */
@@ -90,7 +90,7 @@ extern char rim_launch_name[33];
    Ctrl-D, becomes the app's source; Ctrl-C gives up), delete name (its source and folder, if that's
    all the folder holds) */
 typedef struct {
-  Rio *vm;
+  rio_Vm *vm;
   void (*put)(const char *s, int n);
   char acc[4096];
   int n, line0; /* acc holds the unfinished input; the current line starts at line0 */
@@ -104,7 +104,7 @@ typedef struct {
   int (*restart)(void); /* a fresh rio session, for load (0: done) */
   int loading, errors, saving, saved, cr; char out[256]; int nout; /* load and save as they go */
 } RimRepl;
-int rim_repl_begin(RimRepl *r, Rio *vm, void *scratch, uint32_t size);
+int rim_repl_begin(RimRepl *r, rio_Vm *vm, void *scratch, uint32_t size);
 void rim_repl_stop(RimRepl *r, const char *why); /* the game loop ended (why: NULL, or a message) */
 void rim_repl_char(RimRepl *r, int c);
 /* a fresh session with an app from storage, or with source from memory (the launcher), running:

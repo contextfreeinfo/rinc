@@ -21,12 +21,12 @@ extern const char rim_launcher_src[]; extern const int rim_launcher_src_len; /* 
 #include "rim_audio.h"
 #include "tusb.h" /* (HID key codes) */
 
-#define RIO_MEM (256 << 10)      /* the app space */
+#define APP_SPACE (256 << 10)    /* the app space */
 #define REPL_SCRATCH (32 << 10)  /* the REPL's compiler tables: the app space's top, while the REPL runs */
 
-static _Alignas(16) uint8_t rio_mem[RIO_MEM];
+static _Alignas(16) uint8_t app_space[APP_SPACE];
 static _Alignas(8) uint8_t jit_code[16 << 10]; /* simple loops, compiled to machine code (SRAM runs code) */
-static Rio vm;
+static rio_Vm vm;
 static RimRepl repl;
 
 /* output goes to the serial port, and to the screen unless a game has it */
@@ -81,8 +81,8 @@ static void game_frame(void) {
 static float now(void) { return (float)((double)time_us_64() / 1e6); }
 /* a fresh session, for the REPL's load: the app space as at the start */
 static int restart(void) {
-  return rim_start(&vm, rio_mem, RIO_MEM - REPL_SCRATCH, put) || rio_jit(&vm, jit_code, sizeof jit_code) < 0 ||
-         rio_repl_begin(&vm, rio_mem + RIO_MEM - REPL_SCRATCH, REPL_SCRATCH, 0);
+  return rim_start(&vm, app_space, APP_SPACE - REPL_SCRATCH, put) || rio_jit(&vm, jit_code, sizeof jit_code) < 0 ||
+         rio_replBegin(&vm, app_space + APP_SPACE - REPL_SCRATCH, REPL_SCRATCH, 0);
 }
 
 int main(void) {
@@ -91,14 +91,14 @@ int main(void) {
   rim_keyboard_setup();
   stdio_init_all();
   rim_time = now;
-  ok = !rim_start(&vm, rio_mem, RIO_MEM - REPL_SCRATCH, put) && rio_jit(&vm, jit_code, sizeof jit_code) >= 0;
+  ok = !rim_start(&vm, app_space, APP_SPACE - REPL_SCRATCH, put) && rio_jit(&vm, jit_code, sizeof jit_code) >= 0;
   rim_console_clear(1);
   rim_console_put("Rim\r\n\r\n", 7);
   rim_audio_setup();
   rim_video_start(); /* (core 1: video, then sound) */
   rim_keyboard_start();
   rim_sd_setup();
-  if (!ok || rim_repl_begin(&repl, &vm, rio_mem + RIO_MEM - REPL_SCRATCH, REPL_SCRATCH)) {
+  if (!ok || rim_repl_begin(&repl, &vm, app_space + APP_SPACE - REPL_SCRATCH, REPL_SCRATCH)) {
     for (;;) { printf("rim: can't start: %s\r\n", rio_error(&vm)); sleep_ms(1000); }
   }
   repl.restart = restart;
