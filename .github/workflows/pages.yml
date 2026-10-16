@@ -1,5 +1,6 @@
-# The carts as web pages, on GitHub Pages: each push to main builds the web player and a headless rinc,
-# makes a page of each cart (rinc -web), and an index linking them, from each cart's first comment line.
+# The carts as web pages, on GitHub Pages (rincpc.com): each push to main builds the web player and a
+# headless rinc, makes a page of each cart (rinc -web), and an index linking them, from each cart's first
+# comment line, and the docs (mdbook, from docs/) under /docs.
 name: pages
 
 on:
@@ -40,7 +41,7 @@ jobs:
             echo '<style>body{margin:0;padding:24px 16px;background:#1d2b53;color:#fff1e8;font:16px/1.5 ui-monospace,monospace}'
             echo 'main{max-width:720px;margin:auto}a{color:#ffec27}h1{font-size:22px}li{margin:10px 0}p{color:#c2c3c7}</style>'
             echo '</head><body><main><h1>Rinc carts</h1>'
-            echo '<p>Rinc carts, playing in the browser: the same rio VM as on the board and the desktop. Arrows and V C X Z, or a controller.</p><ul>'
+            echo '<p>Rinc carts, playing in the browser: the same Rio VM as on the board and the desktop. Arrows and V C X Z, or a controller. <a href="docs/">Docs</a>: making carts, and what a Rinc provides.</p><ul>'
             for cart in carts/*.rio; do
               name=$(basename "$cart" .rio)
               case $name in bench|micro) continue;; esac # (timings, not demos)
@@ -48,9 +49,14 @@ jobs:
               about=$(head -1 "$cart" | sed -e 's/^# *//' -e 's/&/\&amp;/g' -e 's/</\&lt;/g')
               echo "<li><a href=\"$name.html\">$name</a>: $about</li>"
             done
-            echo '</ul><p><a href="https://github.com/contextfreeinfo/rinc">Source</a></p></main></body></html>'
+            echo '</ul><p><a href="docs/">Docs</a> &middot; <a href="https://github.com/rincpc/rinc">Source</a></p></main></body></html>'
           } > site/index.html
           ls -l site
+      - name: Make the docs
+        run: |
+          v=0.4.40
+          curl -sSL "https://github.com/rust-lang/mdBook/releases/download/v$v/mdbook-v$v-x86_64-unknown-linux-gnu.tar.gz" | tar -xz
+          ./mdbook build docs --dest-dir ../site/docs
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
