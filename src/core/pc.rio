@@ -1,0 +1,51 @@
+# pc.rio: Rinc's host procs, the pc module. Carts don't import it: pc is there everywhere (pc.cls(0)).
+# This is what pc is, written in rio. Rinc doesn't read it when running a cart (the module comes from
+# what rinc_start registers), but the tests compile it against those registrations, so each
+# declaration's types are checked, and every host proc must be declared here.
+
+# ---------------------------------------------------------------- the screen: 320x240, palette indexes
+
+cls* :: @host proc(c: Int)                           # fill the screen with color c
+pset* :: @host proc(x, y, c: Int)                    # one pixel
+pget* :: @host proc(x, y: Int) -> Int
+rect* :: @host proc(x, y, w, h, c: Int)              # a filled rectangle
+print* :: @host proc(s: String, x, y, c: Int)        # text, in the 5x8 font, 6 pixels a character
+
+# ---------------------------------------------------------------- input
+
+# 1 while button i is held: 0 left, 1 right, 2 up, 3 down (arrows), then the face buttons, as on an Xbox
+# controller: 4 A (V key), 5 B (C), 6 X (X), 7 Y (Z); then a controller's 8 LB, 9 RB, 10 and 11 the
+# sticks pressed in, 12 Start, 13 Back
+btn* :: @host proc(i: Int) -> Int
+# the next character typed (32-126, 13 Enter, 8 Backspace, 27 Esc), or -1: for text
+key* :: @host proc() -> Int
+# a controller's sticks: 0 left x, 1 left y, 2 right x, 3 right y; -1 to 1, + right and down
+stick* :: @host proc(i: Int) -> Float
+trigger* :: @host proc(i: Int) -> Float              # 0 left, 1 right; 0 to 1
+time* :: @host proc() -> Float                       # seconds since start
+
+# ---------------------------------------------------------------- data
+
+# bytes from hex digits into out (anything else in the text is skipped), until it's full: how many
+fromHex* :: @host proc(out: Blob, text: String) -> Int
+
+# ---------------------------------------------------------------- sound: 8 voices, 0 to 7
+
+# play data on voice v, once, at rate frames a second: bits 16 or 8 (signed), or 4 for IMA ADPCM;
+# 1 or 2 channels
+sound* :: @host proc(v: Int, data: Blob, bits, channels: Int, rate: Float)
+soundWav* :: @host proc(v: Int, data: Blob) -> Int   # a WAV file's sound, at its own rate: 1 if it could
+soundRate* :: @host proc(v: Int, rate: Float)
+soundVolume* :: @host proc(v: Int, volume: Float)    # 0 to 1
+soundPan* :: @host proc(v: Int, pan: Float)          # -1 to 1
+soundLoop* :: @host proc(v, start, stop: Int)        # from frame stop, back to start (stop 0: no loop)
+soundStop* :: @host proc(v: Int)
+soundPlaying* :: @host proc(v: Int) -> Int
+
+# ---------------------------------------------------------------- apps, for the launcher
+
+apps* :: @host proc() -> Int                         # the apps on the SD card (sorted): how many
+appName* :: @host proc(i: Int, out: Blob) -> Int     # app i's folder name, into out: how long
+appInfo* :: @host proc(i: Int, out: Blob) -> Int     # its first line: "Title: what it does"
+launch* :: @host proc(name: String)                  # switch to an app, after this frame
+openConsole* :: @host proc()                         # or to the console

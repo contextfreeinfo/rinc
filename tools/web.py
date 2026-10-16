@@ -11,7 +11,7 @@ the VM-only wasm.)
 """
 import base64, html, os, shutil, subprocess, sys, tempfile
 
-COMPILER_PROCS = {'rioCompile', 'rioEval'}  # (none exist yet: host procs that would need the compiler)
+COMPILER_PROCS = {'pc.rioCompile', 'pc.rioEval'}  # (none exist yet: host procs that would need the compiler)
 
 args = [a for a in sys.argv[1:] if not a.startswith('--')]
 opts = dict(a[2:].split('=', 1) for a in sys.argv[1:] if a.startswith('--') and '=' in a)

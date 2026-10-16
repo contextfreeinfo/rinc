@@ -41,7 +41,7 @@ end
 reset()
 
 pressed :: proc() -> Bool
-  return btn(4) == 1 or btn(5) == 1
+  return pc.btn(4) == 1 or pc.btn(5) == 1
 end
 
 update* :: proc()
@@ -51,10 +51,10 @@ update* :: proc()
     end
     return
   end
-  if btn(0) == 1
+  if pc.btn(0) == 1
     padx -= 4.0
   end
-  if btn(1) == 1
+  if pc.btn(1) == 1
     padx += 4.0
   end
   padx = max(0.0, min(padx, 320.0 - PADW.toFloat()))
@@ -101,25 +101,25 @@ update* :: proc()
 end
 
 draw* :: proc()
-  cls(1)
+  pc.cls(1)
   for r in 0..<ROWS
     for c in 0..<COLS
       k := bricks[r * COLS + c]
       if k != 0
-        rect(5 + c * 31, 30 + r * 12, 30, 10, k)
+        pc.rect(5 + c * 31, 30 + r * 12, 30, 10, k)
       end
     end
   end
-  rect(padx.toInt(), 226, PADW, 4, 7)
-  rect(ball.x.toInt() - 2, ball.y.toInt() - 2, 4, 4, 10)
+  pc.rect(padx.toInt(), 226, PADW, 4, 7)
+  pc.rect(ball.x.toInt() - 2, ball.y.toInt() - 2, 4, 4, 10)
   text.clear()
   ok := text.format("SCORE ", score, "   LIVES ", lives)
-  print(text[:].asString(), 4, 4, 7)
+  pc.print(text[:].asString(), 4, 4, 7)
   if left == 0
-    print("YOU WIN!  V to play again", 85, 120, 11)
+    pc.print("YOU WIN!  V to play again", 85, 120, 11)
   else if lives == 0
-    print("GAME OVER  V to play again", 82, 120, 8)
+    pc.print("GAME OVER  V to play again", 82, 120, 8)
   else if serving
-    print("V to serve", 130, 150, 6)
+    pc.print("V to serve", 130, 150, 6)
   end
 end

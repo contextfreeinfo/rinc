@@ -291,7 +291,7 @@ static void rinc_hostStop(rio_Vm *vm, rio_Val *a) { rinc_Voice *v = rinc_voice(a
 static void rinc_hostPlaying(rio_Vm *vm, rio_Val *a) { rinc_Voice *v = rinc_voice(a); (void)vm; a[0].i = v && v->on; }
 
 int rinc_audioProcs(rio_Vm *vm) {
-  return rio_addFfi(vm, "sound", "ibiif", rinc_hostSound) || rio_addFfi(vm, "soundRate", "if", rinc_hostRate) || rio_addFfi(vm, "soundVolume", "if", rinc_hostVolume) ||
-         rio_addFfi(vm, "soundPan", "if", rinc_hostPan) || rio_addFfi(vm, "soundLoop", "iii", rinc_hostLoop) || rio_addFfi(vm, "soundStop", "i", rinc_hostStop) ||
-         rio_addFfi(vm, "soundPlaying", "i>i", rinc_hostPlaying) || rio_addFfi(vm, "soundWav", "ib>i", rinc_hostWav);
+  return rio_addFfi(vm, "pc.sound", "ibiif", rinc_hostSound) || rio_addFfi(vm, "pc.soundRate", "if", rinc_hostRate) || rio_addFfi(vm, "pc.soundVolume", "if", rinc_hostVolume) ||
+         rio_addFfi(vm, "pc.soundPan", "if", rinc_hostPan) || rio_addFfi(vm, "pc.soundLoop", "iii", rinc_hostLoop) || rio_addFfi(vm, "pc.soundStop", "i", rinc_hostStop) ||
+         rio_addFfi(vm, "pc.soundPlaying", "i>i", rinc_hostPlaying) || rio_addFfi(vm, "pc.soundWav", "ib>i", rinc_hostWav);
 }

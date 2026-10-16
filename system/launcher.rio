@@ -19,15 +19,15 @@ held := 0
 repeat := 0
 
 refresh :: proc()
-  count = min(apps(), 64)
+  count = min(pc.apps(), 64)
   at := 0
   bt := 0
   for i in 0..<count
     nameAt[i] = at
-    nameLen[i] = min(appName(i, names[at:at + 32]), 32)
+    nameLen[i] = min(pc.appName(i, names[at:at + 32]), 32)
     at += nameLen[i]
     infoAt[i] = bt
-    infoLen[i] = min(appInfo(i, infos[bt:bt + 96]), 96)
+    infoLen[i] = min(pc.appInfo(i, infos[bt:bt + 96]), 96)
     titleLen[i] = 0
     for k in 0..<min(infoLen[i], 24)
       if titleLen[i] == 0 and infos[bt + k] == 58 # (the colon)
@@ -95,14 +95,14 @@ start :: proc()
   end
   k := shown[pick]
   if k < 0
-    openConsole()
+    pc.openConsole()
   else
-    launch(names[nameAt[k]:nameAt[k] + nameLen[k]].asString())
+    pc.launch(names[nameAt[k]:nameAt[k] + nameLen[k]].asString())
   end
 end
 
 update* :: proc()
-  c := key()
+  c := pc.key()
   for c >= 0
     if c == 13
       start()
@@ -122,9 +122,9 @@ update* :: proc()
       end
     end
     narrow()
-    c = key()
+    c = pc.key()
   end
-  bits := btn(2) + btn(3) * 2 + btn(4) * 4
+  bits := pc.btn(2) + pc.btn(3) * 2 + pc.btn(4) * 4
   if bits & 4 == 4 and held & 4 == 0
     start()
   end
@@ -149,28 +149,28 @@ end
 
 # a box with its corners a pixel in: softer than a plain rectangle
 pill :: proc(x: Int, y: Int, w: Int, h: Int, c: Int, under: Int)
-  rect(x, y, w, h, c)
-  pset(x, y, under)
-  pset(x + w - 1, y, under)
-  pset(x, y + h - 1, under)
-  pset(x + w - 1, y + h - 1, under)
+  pc.rect(x, y, w, h, c)
+  pc.pset(x, y, under)
+  pc.pset(x + w - 1, y, under)
+  pc.pset(x, y + h - 1, under)
+  pc.pset(x + w - 1, y + h - 1, under)
 end
 
 draw* :: proc()
-  cls(1)
-  print("Rinc", 12, 12, 7)
-  rect(12, 21, 23, 1, 10) # (an accent under the name)
+  pc.cls(1)
+  pc.print("Rinc", 12, 12, 7)
+  pc.rect(12, 21, 23, 1, 10) # (an accent under the name)
   if count > 0
     n: Blob[..16]
     ok := n.format(count, " apps")
-    print(n[0:n.len()].asString(), 308 - n.len() * 6, 12, 13)
+    pc.print(n[0:n.len()].asString(), 308 - n.len() * 6, 12, 13)
   end
   pill(8, 30, 304, 15, 0, 1)
   if filter.len() == 0
-    print("Search", 14, 34, 5)
+    pc.print("Search", 14, 34, 5)
   end
-  print(filter[0:filter.len()].asString(), 14, 34, 7)
-  rect(13 + filter.len() * 6, 33, 1, 8, 10)
+  pc.print(filter[0:filter.len()].asString(), 14, 34, 7)
+  pc.rect(13 + filter.len() * 6, 33, 1, 8, 10)
   top := max(0, pick - 12)
   for row in 0..<min(nshown - top, 14)
     i := top + row
@@ -185,26 +185,26 @@ draw* :: proc()
       dim = 6
     end
     if k < 0
-      print("Console", 16, y, 7)
-      print("rio, typed and run", 96, y, dim)
+      pc.print("Console", 16, y, 7)
+      pc.print("rio, typed and run", 96, y, dim)
     else
       t := title(k)
-      print(t.asString(), 16, y, 7)
+      pc.print(t.asString(), 16, y, 7)
       if titleLen[k] > 0
         at := titleLen[k] + 1
         for at < infoLen[k] and infos[infoAt[k] + at] == 32 # (the spaces after the colon)
           at += 1
         end
         d := infos[infoAt[k] + at:infoAt[k] + min(infoLen[k], at + 35)]
-        print(d.asString(), 96, y, dim)
+        pc.print(d.asString(), 96, y, dim)
       end
     end
   end
   if nshown == 0
-    print("Nothing matches", 16, 54, 13)
+    pc.print("Nothing matches", 16, 54, 13)
   end
   if count == 0
-    print("No apps on the card yet: /rinc/apps", 12, 216, 13)
+    pc.print("No apps on the card yet: /rinc/apps", 12, 216, 13)
   end
-  print("Enter opens   Esc clears", 12, 228, 5)
+  pc.print("Enter opens   Esc clears", 12, 228, 5)
 end

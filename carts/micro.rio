@@ -1,20 +1,20 @@
 # cost per VM instruction: each loop adds one kind of op to the loop's FORI
 micro :: proc()
   n := 0
-  t := time()
+  t := pc.time()
   for i in 0..<1000000
   end
-  e := time() - t
-  t = time()
+  e := pc.time() - t
+  t = pc.time()
   for i in 0..<1000000
     n += i
   end
-  a := time() - t
-  t = time()
+  a := pc.time() - t
+  t = pc.time()
   for i in 0..<1000000
     n += i % 7
   end
-  m := time() - t
+  m := pc.time() - t
   log("ns/iter: empty", e * 1000.0, "add", a * 1000.0, "add+mod", m * 1000.0, n)
 end
 micro()

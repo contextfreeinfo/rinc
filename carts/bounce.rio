@@ -28,15 +28,15 @@ add()
 update* :: proc()
   tick += 1
   # TODO What really is going on here?
-  gx = (btn(1) - btn(0)).toFloat() * 0.15
-  gy = (btn(3) - btn(2)).toFloat() * 0.15 + 0.15
-  if btn(4) == 1 and not held
+  gx = (pc.btn(1) - pc.btn(0)).toFloat() * 0.15
+  gy = (pc.btn(3) - pc.btn(2)).toFloat() * 0.15 + 0.15
+  if pc.btn(4) == 1 and not held
     add()
   end
-  held = btn(4) == 1
+  held = pc.btn(4) == 1
   for b, k in balls
     hit := false
-    if btn(5) == 1
+    if pc.btn(5) == 1
       # Include some variance also in the shake.
       b.dy -= 1.0 + 0.05 * ((k % 7).toFloat() - 3.0)
     end
@@ -55,21 +55,21 @@ update* :: proc()
       hit = hit or abs(b.dy) > 0.5
     end
     if hit # its own voice, pitched by color, panned by where it hit
-      sound(k % 8, blip, 8, 1, 16000.0 + (b.c - 8).toFloat() * 3000.0)
-      soundPan(k % 8, b.x / 160.0 - 1.0)
+      pc.sound(k % 8, blip, 8, 1, 16000.0 + (b.c - 8).toFloat() * 3000.0)
+      pc.soundPan(k % 8, b.x / 160.0 - 1.0)
     end
   end
 end
 
 draw* :: proc()
-  cls(0)
+  pc.cls(0)
   for b in balls
-    rect(b.x.toInt() - 4, b.y.toInt() - 4, 8, 8, b.c)
+    pc.rect(b.x.toInt() - 4, b.y.toInt() - 4, 8, 8, b.c)
   end
-  print("arrows tilt  V adds  C shakes", 4, 4, 6)
+  pc.print("arrows tilt  V adds  C shakes", 4, 4, 6)
   # Report ball count.
   report: Blob[..100]
   report.clear()
   report.format("count: ", balls.len())
-  print(report[:].asString(), 4, 13, 6)
+  pc.print(report[:].asString(), 4, 13, 6)
 end

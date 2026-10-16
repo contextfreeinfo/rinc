@@ -27,28 +27,30 @@ carts/             rio programs
 
 ## Carts
 
-Carts draw into one 320x240 screen of 8-bit palette indexes, through host procs:
+Carts draw into one 320x240 screen of 8-bit palette indexes, through host procs. They're in the module
+`pc` (for personal computer), which every cart has without an import: `pc.cls(0)`. [`src/core/pc.rio`](src/core/pc.rio)
+declares them all, with their types, and the tests check it against what Rinc registers:
 
 | proc | |
 |---|---|
-| `cls(c)` | fill the screen with color c |
-| `pset(x, y, c)`, `pget(x, y) -> c` | one pixel |
-| `rect(x, y, w, h, c)` | a filled rectangle |
-| `print(s, x, y, c)` | text, in the 5x8 font, 6 pixels a character |
-| `btn(i) -> Int` | 1 while button i is held: 0 left, 1 right, 2 up, 3 down (arrows), then the face buttons, most important first and named as on an Xbox controller: 4 A (V key), 5 B (C), 6 X (X), 7 Y (Z); then a controller's 8 LB, 9 RB, 10 and 11 the sticks pressed in, 12 Start, 13 Back |
-| `key() -> Int` | the next character typed (32-126, 13 Enter, 8 Backspace, 27 Esc), or -1: for text. Held keys also press buttons, so a cart reads whichever suits it |
-| `stick(i) -> Float` | a controller's sticks: 0 left x, 1 left y, 2 right x, 3 right y; -1 to 1, + right and down, 0 near the middle |
-| `trigger(i) -> Float` | its triggers: 0 left, 1 right; 0 to 1 |
-| `time() -> Float` | seconds since start |
-| `apps() -> Int`, `appName(i, out) -> Int`, `appInfo(i, out) -> Int` | the apps on the SD card (sorted): how many, and app i's folder name or first line, into a Blob (how long) |
-| `launch(name)`, `openConsole()` | switch to an app, or the console, after this frame |
-| `fromHex(out, text) -> Int` | bytes from hex digits into a Blob (anything else in the text is skipped), until it's full: how many. For data typed into a cart |
+| `pc.cls(c)` | fill the screen with color c |
+| `pc.pset(x, y, c)`, `pc.pget(x, y) -> c` | one pixel |
+| `pc.rect(x, y, w, h, c)` | a filled rectangle |
+| `pc.print(s, x, y, c)` | text, in the 5x8 font, 6 pixels a character |
+| `pc.btn(i) -> Int` | 1 while button i is held: 0 left, 1 right, 2 up, 3 down (arrows), then the face buttons, most important first and named as on an Xbox controller: 4 A (V key), 5 B (C), 6 X (X), 7 Y (Z); then a controller's 8 LB, 9 RB, 10 and 11 the sticks pressed in, 12 Start, 13 Back |
+| `pc.key() -> Int` | the next character typed (32-126, 13 Enter, 8 Backspace, 27 Esc), or -1: for text. Held keys also press buttons, so a cart reads whichever suits it |
+| `pc.stick(i) -> Float` | a controller's sticks: 0 left x, 1 left y, 2 right x, 3 right y; -1 to 1, + right and down, 0 near the middle |
+| `pc.trigger(i) -> Float` | its triggers: 0 left, 1 right; 0 to 1 |
+| `pc.time() -> Float` | seconds since start |
+| `pc.apps() -> Int`, `pc.appName(i, out) -> Int`, `pc.appInfo(i, out) -> Int` | the apps on the SD card (sorted): how many, and app i's folder name or first line, into a Blob (how long) |
+| `pc.launch(name)`, `pc.openConsole()` | switch to an app, or the console, after this frame |
+| `pc.fromHex(out, text) -> Int` | bytes from hex digits into a Blob (anything else in the text is skipped), until it's full: how many. For data typed into a cart |
 
 The palette is the PICO-8 16 colors, then a 6x6x6 color cube, then 24 grays.
 
 **Controllers.** An Xbox-style controller is player 1 alongside the keyboard: its d-pad and face
-buttons are the same `btn` numbers as the keys (and its left stick pushed well over counts as the
-arrows), and `stick` and `trigger` read it, or give 0 without one. On the desktop that's any controller
+buttons are the same `pc.btn` numbers as the keys (and its left stick pushed well over counts as the
+arrows), and `pc.stick` and `pc.trigger` read it, or give 0 without one. On the desktop that's any controller
 SDL knows (Xbox, PlayStation, Switch and more); on the web, any the browser maps to the standard layout;
 on the Fruit Jam, wired Xbox 360 and Xbox One/Series controllers, recognized by the USB interfaces they
 offer (`src/rp2350/gamepad.c`).
@@ -59,16 +61,16 @@ interpolation:
 
 | proc | |
 |---|---|
-| `sound(v, data, bits, channels, rate)` | play data on voice v, once, at rate frames a second: bits 16 or 8 (signed), or 4 for IMA ADPCM; 1 or 2 channels |
-| `soundWav(v, data) -> Int` | play a WAV file's sound at its own rate (16-bit PCM or IMA ADPCM, mono or stereo): 1 if it could |
-| `soundRate(v, rate)`, `soundVolume(v, 0..1)`, `soundPan(v, -1..1)` | change it while it plays |
-| `soundLoop(v, start, end)` | from frame end, go back to start, over and over (end 0: no loop) |
-| `soundStop(v)`, `soundPlaying(v) -> Int` | |
+| `pc.sound(v, data, bits, channels, rate)` | play data on voice v, once, at rate frames a second: bits 16 or 8 (signed), or 4 for IMA ADPCM; 1 or 2 channels |
+| `pc.soundWav(v, data) -> Int` | play a WAV file's sound at its own rate (16-bit PCM or IMA ADPCM, mono or stereo): 1 if it could |
+| `pc.soundRate(v, rate)`, `pc.soundVolume(v, 0..1)`, `pc.soundPan(v, -1..1)` | change it while it plays |
+| `pc.soundLoop(v, start, end)` | from frame end, go back to start, over and over (end 0: no loop) |
+| `pc.soundStop(v)`, `pc.soundPlaying(v) -> Int` | |
 
 IMA ADPCM is a quarter the size of 16-bit and close to it in sound (a test chord: 38 dB signal to
 noise), so it's the way to keep recorded sound in memory: a second of 22 kHz mono is 11 KB. It's laid
-out as in WAV files (format 0x11), in blocks of 256 bytes a channel for `sound`. `tools/adpcm.py`
-makes it from a 16-bit WAV, as a WAV file or as rio source for `fromHex` (`--tone` makes a test
+out as in WAV files (format 0x11), in blocks of 256 bytes a channel for `pc.sound`. `tools/adpcm.py`
+makes it from a 16-bit WAV, as a WAV file or as rio source for `pc.fromHex` (`--tone` makes a test
 chord): see `carts/chord.rio`. Mixing 8 ADPCM voices takes about 13% of a core on the board; 16-bit,
 about 6%.
 
@@ -91,7 +93,7 @@ A keyboard's volume knob or keys set the system volume (both outputs, in 2.5 dB 
 firmware): the apps on the SD card, sorted, each with the title and description from its first line
 (`# Bounce: the arrow keys tilt gravity...`), and the console (the REPL). Type to narrow the list, up
 and down (or the d-pad) to choose, Enter (or A) to start. The Windows key, or a controller's Xbox
-button, comes back to it from anywhere: it's the one system key. Esc and Ctrl+C belong to apps (`key()`
+button, comes back to it from anywhere: it's the one system key. Esc and Ctrl+C belong to apps (`pc.key()`
 gives 27 for Esc). Over the USB serial port (not the keyboard), Ctrl-C stops what's running and drops
 into the console with it still loaded, for tools such as `send.py`.
 

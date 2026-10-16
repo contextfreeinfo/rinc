@@ -154,13 +154,17 @@ int rinc_start(rio_Vm *vm, void *mem, uint32_t memsize, void (*put)(const char *
   if (rio_init(vm, mem, memsize, 0, 0)) return -1; /* no code buffer: the code goes in mem too */
   rinc_audioReset();
   rio_setLog(vm, rinc_logLine, 0);
-  if (rio_addFfi(vm, "cls", "i", rinc_hostCls) || rio_addFfi(vm, "pset", "iii", rinc_hostPset) || rio_addFfi(vm, "pget", "ii>i", rinc_hostPget) ||
-      rio_addFfi(vm, "rect", "iiiii", rinc_hostRect) || rio_addFfi(vm, "print", "siii", rinc_hostPrint) || rio_addFfi(vm, "btn", "i>i", rinc_hostBtn) || rinc_audioProcs(vm) || rio_addFfi(vm, "time", ">f", rinc_hostTime) ||
-      rio_addFfi(vm, "fromHex", "bs>i", rinc_hostFromhex) || rio_addFfi(vm, "stick", "i>f", rinc_hostStick) || rio_addFfi(vm, "trigger", "i>f", rinc_hostTrigger) ||
-      rio_addFfi(vm, "key", ">i", rinc_hostKey) || rio_addFfi(vm, "apps", ">i", rinc_hostApps) || rio_addFfi(vm, "appName", "ib>i", rinc_hostAppName) ||
-      rio_addFfi(vm, "appInfo", "ib>i", rinc_hostAppInfo) || rio_addFfi(vm, "launch", "s", rinc_hostLaunch) || rio_addFfi(vm, "openConsole", "", rinc_hostOpenConsole)) return -1;
+  if (rinc_hostProcs(vm) || rio_autoImport(vm, "pc")) return -1; /* (pc.cls and so on, everywhere) */
   rinc_typedHead = rinc_typedTail = rinc_typedEsc = 0;
   return 0;
+}
+
+int rinc_hostProcs(rio_Vm *vm) {
+  return rio_addFfi(vm, "pc.cls", "i", rinc_hostCls) || rio_addFfi(vm, "pc.pset", "iii", rinc_hostPset) || rio_addFfi(vm, "pc.pget", "ii>i", rinc_hostPget) ||
+         rio_addFfi(vm, "pc.rect", "iiiii", rinc_hostRect) || rio_addFfi(vm, "pc.print", "siii", rinc_hostPrint) || rio_addFfi(vm, "pc.btn", "i>i", rinc_hostBtn) || rinc_audioProcs(vm) || rio_addFfi(vm, "pc.time", ">f", rinc_hostTime) ||
+         rio_addFfi(vm, "pc.fromHex", "bs>i", rinc_hostFromhex) || rio_addFfi(vm, "pc.stick", "i>f", rinc_hostStick) || rio_addFfi(vm, "pc.trigger", "i>f", rinc_hostTrigger) ||
+         rio_addFfi(vm, "pc.key", ">i", rinc_hostKey) || rio_addFfi(vm, "pc.apps", ">i", rinc_hostApps) || rio_addFfi(vm, "pc.appName", "ib>i", rinc_hostAppName) ||
+         rio_addFfi(vm, "pc.appInfo", "ib>i", rinc_hostAppInfo) || rio_addFfi(vm, "pc.launch", "s", rinc_hostLaunch) || rio_addFfi(vm, "pc.openConsole", "", rinc_hostOpenConsole);
 }
 
 /* a game's frame: update then draw */
