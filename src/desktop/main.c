@@ -79,7 +79,7 @@ static int rinc_writeFile(const char *path, const void *a, size_t an, const void
 
 /* -export: this program's own file, with an image after it and then a trailer: its size (4 bytes,
    little-endian) and rinc_MAGIC. At startup rinc looks for one (so a cart in it runs instead of the REPL) */
-#define rinc_MAGIC "RINCART1"
+#define rinc_MAGIC "RINCAPP0"
 static char *rinc_readAll(const char *path, size_t *len) {
   FILE *f; char *b; long n;
   if (!(f = fopen(path, "rb"))) return 0;
