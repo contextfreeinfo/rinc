@@ -28,15 +28,18 @@ enum { rinc_Button_left = 1, rinc_Button_right = 2, rinc_Button_up = 4, rinc_But
        rinc_Button_lb = 256, rinc_Button_rb = 512, rinc_Button_ls = 1024, rinc_Button_rs = 2048, rinc_Button_start = 4096, rinc_Button_back = 8192 };
 
 /* set up rio in the given memory (the app space: code and data both live there), with log output
-   going to put and the host procs carts call: cls(c), pset(x, y, c), pget(x, y) -> c,
-   rect(x, y, w, h, c), print(s, x, y, c), btn(i) -> Int (1 held), time() -> Float */
+   going to put and the host procs carts call, in module pc (auto-imported; src/core/pc.rio declares
+   them): cls(c), pset(x, y, c), pget(x, y) -> c, rect(x, y, w, h, c), print(s, x, y, c),
+   btn(i) -> Int (1 held), time() -> Float */
 int rinc_start(rio_Vm *vm, void *mem, uint32_t memsize, void (*put)(const char *s, int n));
+/* just the host procs, registered as pc.cls and so on (rinc_start does this, and auto-imports pc) */
+int rinc_hostProcs(rio_Vm *vm);
 /* one frame of a game: the cart's update* and then draw* (each optional). 0: ran, 1: the cart has
    neither (it isn't a game), -1: a runtime error (rio_error says) */
 int rinc_frame(rio_Vm *vm);
 
-/* sound (audio.c): rinc_VOICES voices mixed to rinc_RATE frames a second of 16-bit stereo. Host procs:
-   sound(voice, data, bits, channels, rate), soundRate(voice, rate), soundVolume(voice, 0..1),
+/* sound (audio.c): rinc_VOICES voices mixed to rinc_RATE frames a second of 16-bit stereo. Host procs,
+   in pc: sound(voice, data, bits, channels, rate), soundRate(voice, rate), soundVolume(voice, 0..1),
    soundPan(voice, -1..1), soundLoop(voice, start, end), soundStop(voice), soundPlaying(voice) -> Int.
    A platform pulls samples with rinc_audioMix, and sets rinc_audioLock when that runs on another
    thread or in an interrupt (called with 1 before a host proc changes a voice, 0 after) */

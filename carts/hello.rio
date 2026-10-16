@@ -1,13 +1,13 @@
 # Hello: a first cart: stripes, a box, and the time
-cls(1)
+pc.cls(1)
 for y in 0..<240
   for x in 0..<320
     if (x + y) % 32 < 16
-      pset(x, y, 16 + (x / 20) % 36)
+      pc.pset(x, y, 16 + (x / 20) % 36)
     end
   end
 end
-rect(100, 80, 120, 80, 8)
-rect(110, 90, 100, 60, 7)
-assert(pget(150, 100) == 7)
-log("drawn at", time())
+pc.rect(100, 80, 120, 80, 8)
+pc.rect(110, 90, 100, 60, 7)
+assert(pc.pget(150, 100) == 7)
+log("drawn at", pc.time())

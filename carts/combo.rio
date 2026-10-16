@@ -2,7 +2,7 @@
 # The controller's buttons light up (the arrows and V C X Z press the same ones) and play: A B X Y
 # the notes of a chord, LB and RB drums. Either stick up and down bends the pitch of what's playing,
 # and left and right pans it, the right trigger holds a hum and the left one a buzz an
-# octave down, louder the further they're pulled. Typing (key()) goes on the text line; Enter clears
+# octave down, louder the further they're pulled. Typing (pc.key()) goes on the text line; Enter clears
 # it.
 
 # the sounds, made here: a plucked note (16-bit), a burst of noise (8-bit), and a hum that loops
@@ -52,55 +52,55 @@ end
 update* :: proc()
   bits := 0
   for i in 0..<14
-    bits |= btn(i) << i
+    bits |= pc.btn(i) << i
   end
-  up := stick(1) # (whichever stick is pushed further up or down)
-  if abs(stick(3)) > abs(up)
-    up = stick(3)
+  up := pc.stick(1) # (whichever stick is pushed further up or down)
+  if abs(pc.stick(3)) > abs(up)
+    up = pc.stick(3)
   end
   bend := pow(2.0, -up) # (up is -: up bends up, an octave at most)
-  side := stick(0) # (and further left or right, for panning)
-  if abs(stick(2)) > abs(side)
-    side = stick(2)
+  side := pc.stick(0) # (and further left or right, for panning)
+  if abs(pc.stick(2)) > abs(side)
+    side = pc.stick(2)
   end
   for i in 0..<4
     if (bits >> (4 + i)) & 1 == 1 and (held >> (4 + i)) & 1 == 0
       base[i] = 22050.0 * ratio(i)
-      sound(i, pluck, 16, 1, base[i] * bend)
+      pc.sound(i, pluck, 16, 1, base[i] * bend)
     end
   end
   for i in 0..<2
     if (bits >> (8 + i)) & 1 == 1 and (held >> (8 + i)) & 1 == 0
       base[4 + i] = 11025.0 * (1.0 + i.toFloat())
-      sound(4 + i, noise, 8, 1, base[4 + i] * bend)
+      pc.sound(4 + i, noise, 8, 1, base[4 + i] * bend)
     end
   end
   for i in 0..<2 # the triggers: 7 the hum (right), 6 the buzz (left)
-    pull := trigger(1 - i)
+    pull := pc.trigger(1 - i)
     v := 7 - i
     if pull > 0.02
-      if soundPlaying(v) == 0
+      if pc.soundPlaying(v) == 0
         base[v] = 22050.0 / (1.0 + i.toFloat())
         if i == 0
-          sound(v, hum, 16, 1, base[v])
+          pc.sound(v, hum, 16, 1, base[v])
         else
-          sound(v, buzz, 16, 1, base[v])
+          pc.sound(v, buzz, 16, 1, base[v])
         end
-        soundLoop(v, 0, 98)
+        pc.soundLoop(v, 0, 98)
       end
-      soundVolume(v, pull)
+      pc.soundVolume(v, pull)
     else
-      soundStop(v)
+      pc.soundStop(v)
     end
   end
   for k in 0..<8 # live: bend and pan everything playing
-    if soundPlaying(k) == 1
-      soundRate(k, base[k] * bend)
-      soundPan(k, side)
+    if pc.soundPlaying(k) == 1
+      pc.soundRate(k, base[k] * bend)
+      pc.soundPan(k, side)
     end
   end
   held = bits
-  c := key()
+  c := pc.key()
   for c >= 0
     if c == 13
       text.clear()
@@ -114,53 +114,53 @@ update* :: proc()
       end
     end
     last = c
-    c = key()
+    c = pc.key()
   end
 end
 
 dot :: proc(x: Int, y: Int, sx: Float, sy: Float, c: Int)
-  rect(x, y, 61, 61, 5)
-  rect(x + 28 + (sx * 28.0).toInt(), y + 28 + (sy * 28.0).toInt(), 5, 5, c)
+  pc.rect(x, y, 61, 61, 5)
+  pc.rect(x + 28 + (sx * 28.0).toInt(), y + 28 + (sy * 28.0).toInt(), 5, 5, c)
 end
 
 bar :: proc(x: Int, y: Int, v: Float, c: Int)
-  rect(x, y, 10, 61, 5)
+  pc.rect(x, y, 10, 61, 5)
   h := (v * 61.0).toInt()
-  rect(x, y + 61 - h, 10, h, c)
+  pc.rect(x, y + 61 - h, 10, h, c)
 end
 
 draw* :: proc()
-  cls(1)
-  print("COMBO: BUTTONS PLAY, STICKS BEND AND PAN, LT RT HUM", 8, 6, 7)
+  pc.cls(1)
+  pc.print("COMBO: BUTTONS PLAY, STICKS BEND AND PAN, LT RT HUM", 8, 6, 7)
   for i in 0..<14
     x := 8 + (i % 7) * 44
     y := 20 + (i / 7) * 16
     c := 5
-    if btn(i) == 1
+    if pc.btn(i) == 1
       c = 11
     end
-    rect(x, y, 40, 12, c)
-    print(names[i * 5:i * 5 + 5], x + 3, y + 2, 7)
+    pc.rect(x, y, 40, 12, c)
+    pc.print(names[i * 5:i * 5 + 5], x + 3, y + 2, 7)
   end
-  dot(8, 58, stick(0), stick(1), 8)
-  dot(76, 58, stick(2), stick(3), 12)
-  bar(146, 58, trigger(0), 9)
-  bar(162, 58, trigger(1), 9)
-  print("VOICES", 190, 58, 6)
+  dot(8, 58, pc.stick(0), pc.stick(1), 8)
+  dot(76, 58, pc.stick(2), pc.stick(3), 12)
+  bar(146, 58, pc.trigger(0), 9)
+  bar(162, 58, pc.trigger(1), 9)
+  pc.print("VOICES", 190, 58, 6)
   for k in 0..<8
     c := 5
-    if soundPlaying(k) == 1
+    if pc.soundPlaying(k) == 1
       c = 8 + k
     end
-    rect(190 + k * 14, 70, 10, 10, c)
+    pc.rect(190 + k * 14, 70, 10, 10, c)
   end
-  print("TYPE:", 8, 130, 6)
-  rect(40, 128, 272, 12, 0)
-  print(text[0:text.len()].asString(), 43, 130, 7)
-  print("LAST KEY:", 8, 148, 6)
+  pc.print("TYPE:", 8, 130, 6)
+  pc.rect(40, 128, 272, 12, 0)
+  pc.print(text[0:text.len()].asString(), 43, 130, 7)
+  pc.print("LAST KEY:", 8, 148, 6)
   if last >= 0
     lk: Blob[..12]
     ok := lk.format(last)
-    print(lk[0:lk.len()].asString(), 70, 148, 10)
+    pc.print(lk[0:lk.len()].asString(), 70, 148, 10)
   end
 end
