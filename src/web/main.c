@@ -82,13 +82,16 @@ rinc_EXPORT(start) int rinc_webStart(int len) {
   return 0;
 }
 /* a frame with these buttons held (keys, for the system key: 1 Shift, 2 another key, 4 Esc or a
-   controller's Back, 8 its guide button): 0 a game's frame ran, 1 nothing's running (the page keeps
+   controller's Back, 8 its guide button, 16 Tab, 32 Q, 64 P, 128 Enter): 0 a game's frame ran, 1 nothing's running (the page keeps
    calling, for the system key). An app's error goes on the screen; then any switch, to an app or
    (Sys+Esc) home */
 rinc_EXPORT(frame) int rinc_webFrame(int buttons, int keys) {
-  if (rinc_systemKey(keys & 8, keys & 1, keys & 2, keys & 4)) { strcpy(rinc_launchName, "home"); rinc_launch = 1; }
+  int sys = (keys & 4 ? rinc_SysKey_esc : 0) | (keys & 16 ? rinc_SysKey_tab : 0) | (keys & 32 ? rinc_SysKey_q : 0) |
+            (keys & 64 ? rinc_SysKey_p : 0) | (keys & 128 ? rinc_SysKey_enter : 0) |
+            (buttons & rinc_Button_rb ? rinc_SysKey_next : 0) | (buttons & rinc_Button_lb ? rinc_SysKey_prev : 0); /* (a controller's RB, LB) */
+  if (rinc_systemKey(keys & 8, keys & 1, keys & 2, sys)) rinc_launch = 1; /* (to rinc_launchName) */
   else {
-    rinc_buttons = (uint16_t)buttons;
+    rinc_buttons = rinc_systemHeld() ? 0 : (uint16_t)buttons; /* (a system combination: not the app's) */
     rinc_gameFrame(&rinc_vm);
   }
   if (rinc_launch) { rinc_launch = 0; rinc_webOpen(rinc_launchName); }

@@ -72,6 +72,47 @@ int main(void) {
       return 1;
     }
   }
+  { /* recent apps: started a, then b. Sys+Tab, then Enter: a. Sys+Q (in b): back to a, b forgotten. Sys+P:
+       the performance strip, up while nothing's held */
+    int f, go = 0;
+    rinc_appBegin(&vm, space, sizeof space, "a", put);
+    rinc_appBegin(&vm, space, sizeof space, "b", put);
+    for (f = 0; f < 60; f++) rinc_systemKey(0, 0, 0, 0);
+    rinc_systemKey(0, 1, 0, 0); rinc_systemKey(0, 0, 0, 0); rinc_systemKey(0, 1, 0, 0); rinc_systemKey(0, 0, 0, 0);
+    go |= rinc_systemKey(0, 0, 1, rinc_SysKey_tab); /* (the switcher, on a) */
+    go |= rinc_systemKey(0, 0, 0, 0);
+    if (go || !rinc_systemHeld()) { printf("FAIL: no switcher\n"); return 1; }
+    if (!rinc_systemKey(0, 0, 1, rinc_SysKey_enter) || strcmp(rinc_launchName, "a")) { printf("FAIL: the switcher didn't go to a\n"); return 1; }
+    rinc_appBegin(&vm, space, sizeof space, "b", put); /* (b again, the latest) */
+    for (f = 0; f < 60; f++) rinc_systemKey(0, 0, 0, 0);
+    rinc_systemKey(0, 1, 0, 0); rinc_systemKey(0, 0, 0, 0); rinc_systemKey(0, 1, 0, 0); rinc_systemKey(0, 0, 0, 0);
+    if (!rinc_systemKey(0, 0, 1, rinc_SysKey_q) || strcmp(rinc_launchName, "a")) { printf("FAIL: Sys+Q didn't go back to a\n"); return 1; }
+    rinc_appBegin(&vm, space, sizeof space, "a", put);
+    for (f = 0; f < 60; f++) rinc_systemKey(0, 0, 0, 0);
+    rinc_systemKey(0, 1, 0, 0); rinc_systemKey(0, 0, 0, 0); rinc_systemKey(0, 1, 0, 0); rinc_systemKey(0, 0, 0, 0);
+    if (rinc_systemKey(0, 0, 1, rinc_SysKey_tab) || rinc_systemHeld() > 1) { printf("FAIL: a switcher with b forgotten\n"); return 1; }
+    for (f = 0; f < 60; f++) rinc_systemKey(0, 0, 0, 0);
+    rinc_systemKey(0, 1, 0, 0); rinc_systemKey(0, 0, 0, 0); rinc_systemKey(0, 1, 0, 0); rinc_systemKey(0, 0, 0, 0);
+    rinc_systemKey(0, 0, 1, rinc_SysKey_p);
+    for (f = 0; f < 60; f++) rinc_systemKey(0, 0, 0, 0);
+    if (!rinc_overlayOn || rinc_overlay[0][0] != 5) { printf("FAIL: no performance strip\n"); return 1; }
+    /* a controller: guide held, RB opens the switcher on the app before, and letting go of guide switches;
+       LB starts from the other end (with c, b, a recent: a) */
+    rinc_appBegin(&vm, space, sizeof space, "b", put);
+    rinc_appBegin(&vm, space, sizeof space, "c", put);
+    rinc_systemKey(1, 0, 0, 0);
+    if (rinc_systemKey(1, 0, 0, rinc_SysKey_next) || rinc_systemKey(1, 0, 0, 0) || !rinc_systemKey(0, 0, 0, 0) || strcmp(rinc_launchName, "b")) {
+      printf("FAIL: guide and RB didn't switch to b\n");
+      return 1;
+    }
+    rinc_appBegin(&vm, space, sizeof space, "b", put);
+    rinc_systemKey(1, 0, 0, 0);
+    if (rinc_systemKey(1, 0, 0, rinc_SysKey_prev) || rinc_systemKey(1, 0, 0, 0) || !rinc_systemKey(0, 0, 0, 0) || strcmp(rinc_launchName, "a")) {
+      printf("FAIL: guide and LB didn't switch to a\n");
+      return 1;
+    }
+    rinc_systemKey(0, 0, 0, rinc_SysKey_p); /* (not held: nothing) */
+  }
   printf("all keys came through\n");
   return 0;
 }

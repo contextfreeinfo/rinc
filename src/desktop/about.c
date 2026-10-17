@@ -29,7 +29,8 @@ const char rinc_help[] =
   "macOS, else $XDG_DATA_HOME or ~/.local/share. Apps keep to it, each with a save space of its own.\n"
   "\n"
   "Playing: the arrows and V, C, X and Z, or a controller. Shift tapped twice is the system key (a\n"
-  "controller's guide button): then Esc (or Back), home. Docs: https://rincpc.com/docs/\n";
+  "controller's guide button): then Esc (or Back) goes home, Tab switches among recent apps, Q goes back\n"
+  "to the app before, and P shows how long frames take. Docs: https://rincpc.com/docs/\n";
 
 const char rinc_license[] =
   "Rinc\n"

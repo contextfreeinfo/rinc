@@ -165,8 +165,9 @@ canvas { position: absolute; inset: 0; margin: auto; image-rendering: pixelated;
   addEventListener("keyup", e => { held.delete(e.code); if (keys[e.code]) buttons &= ~keys[e.code]; });
   addEventListener("blur", () => { buttons = 0; held.clear(); });
   const systemKeys = pad => {
-    const shift = held.has("ShiftLeft") || held.has("ShiftRight"), other = [...held].some(k => !k.startsWith("Shift") && k !== "Escape");
-    return (shift ? 1 : 0) | (other ? 2 : 0) | (held.has("Escape") || pad.back ? 4 : 0) | (pad.guide ? 8 : 0);
+    const shift = held.has("ShiftLeft") || held.has("ShiftRight"), other = [...held].some(k => !k.startsWith("Shift"));
+    return (shift ? 1 : 0) | (other ? 2 : 0) | (held.has("Escape") || pad.back ? 4 : 0) | (pad.guide ? 8 : 0) |
+      (held.has("Tab") ? 16 : 0) | (held.has("KeyQ") ? 32 : 0) | (held.has("KeyP") ? 64 : 0) | (held.has("Enter") || held.has("NumpadEnter") ? 128 : 0);
   };
   const tick = now => {
     while (now >= next) { // 60 frames a second, whatever the display's rate (and on after an app stops or
