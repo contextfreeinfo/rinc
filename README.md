@@ -1,5 +1,7 @@
 # Rinc OS
 
+Disclaimer: Claude Code produced almost every line of code so far.
+
 An instant-on, PICO-8-flavored computer for making and playing little games, built on
 [Rio](https://github.com/contextfreeinfo/rio). It runs on RP2350 boards (the Adafruit Fruit Jam
 first), where it boots to its home screen and a console in an instant, and the same apps run on the desktop
