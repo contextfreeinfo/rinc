@@ -470,33 +470,120 @@ static int rinc_overlayText(const char *s, int x, int fg) {
   }
   return x;
 }
-static void rinc_overlayDraw(void) {
-  int x;
-  memset(rinc_overlay, 0, sizeof rinc_overlay);
-  memset(rinc_overlay[0], 10, rinc_W); /* (a yellow edge) */
-  x = rinc_overlayText("SYSTEM", 4, 10);
-  rinc_overlayText("Esc: home", x + 12, 7);
+static void rinc_overlayDot(int x, int y, int c) { if (x >= 0 && x < rinc_W && y >= 0 && y < rinc_OVERLAY_H) rinc_overlay[y][x] = (uint8_t)c; }
+
+/* recent apps, the latest first (each app's start puts it there): for Sys+Tab and Sys+Q */
+#define rinc_RECENT 8
+static char rinc_recent[rinc_RECENT][33];
+static int rinc_recentCount;
+static void rinc_recentDrop(int i) {
+  for (; i + 1 < rinc_recentCount; i++) memcpy(rinc_recent[i], rinc_recent[i + 1], sizeof rinc_recent[0]);
+  if (rinc_recentCount > 0) rinc_recentCount--;
 }
-int rinc_systemKey(int sysDown, int shiftDown, int otherDown, int escDown) {
-  /* Shift as the system key: tapped (pressed and let go with nothing else), then pressed again within
-     0.4 s: the system key while it's held, and for 0.7 s after it's let go (so Esc can come after, as
-     browsers keep Shift+Esc). shift: 0 nothing yet, 1 the tap's press, 2 tapped, 3 held as the system
-     key, 4 let go, still the system key for the next key */
-  static int shift, frames, wasShift, wasEsc;
-  int esc = escDown && !wasEsc, home;
+static void rinc_recentAdd(const char *name) {
+  int i;
+  for (i = 0; i < rinc_recentCount && strcmp(rinc_recent[i], name); i++) {}
+  if (i < rinc_recentCount) rinc_recentDrop(i);
+  else if (rinc_recentCount == rinc_RECENT) rinc_recentCount--;
+  memmove(rinc_recent[1], rinc_recent[0], sizeof rinc_recent[0] * (size_t)rinc_recentCount);
+  snprintf(rinc_recent[0], sizeof rinc_recent[0], "%s", name);
+  rinc_recentCount++;
+}
+
+/* the performance strip (Sys+P): each frame's time, against the 1/60 s a frame has */
+static float rinc_frameMs[256];
+static int rinc_frameAt, rinc_perfOn;
+static void rinc_perfNote(float ms) { rinc_frameMs[rinc_frameAt++ & 255] = ms; }
+
+static int rinc_switching, rinc_pick; /* the switcher (Sys+Tab) is up, and which recent app it's on */
+
+/* the overlay: the switcher, else the system key's combinations, else the performance strip */
+static void rinc_overlayDraw(void) {
+  int x, i;
+  memset(rinc_overlay, 0, sizeof rinc_overlay);
+  if (rinc_switching) {
+    memset(rinc_overlay[0], 12, rinc_W); /* (a blue edge) */
+    x = rinc_overlayText("SWITCH", 4, 12) + 12;
+    for (i = 0; i < rinc_recentCount && x < rinc_W; i++) {
+      int end = x + (int)strlen(rinc_recent[i]) * 6, y;
+      if (i == rinc_pick)
+        for (y = 1; y < rinc_OVERLAY_H; y++) memset(&rinc_overlay[y][x - 2 < 0 ? 0 : x - 2], 2, (size_t)((end + 2 > rinc_W ? rinc_W : end + 2) - (x - 2 < 0 ? 0 : x - 2)));
+      x = rinc_overlayText(rinc_recent[i], x, i == rinc_pick ? 7 : 6) + 12;
+    }
+  } else if (rinc_systemDown) {
+    memset(rinc_overlay[0], 10, rinc_W); /* (a yellow edge) */
+    x = rinc_overlayText("SYSTEM", 4, 10);
+    rinc_overlayText("Esc home  Tab switch  Q back  P perf", x + 12, 7);
+  } else if (rinc_perfOn) { /* the latest frame's time, then a bar a frame, the newest at the right: 8 high is 1/60 s */
+    char text[24]; float ms = rinc_frameMs[(rinc_frameAt - 1) & 255];
+    int pct = (int)(ms * 6.0f + 0.5f); /* (of 16.67 ms) */
+    memset(rinc_overlay[0], 5, rinc_W);
+    if (ms < 10) snprintf(text, sizeof text, "%d.%02dms %d%%", (int)ms, (int)(ms * 100.0f) % 100, pct);
+    else snprintf(text, sizeof text, "%d.%dms %d%%", (int)ms, (int)(ms * 10.0f) % 10, pct);
+    rinc_overlayText(text, 2, pct < 50 ? 11 : pct <= 100 ? 10 : 8);
+    for (x = 90; x < rinc_W - 2; x++) {
+      int age = rinc_W - 3 - x, h, y; float f;
+      if (age >= rinc_frameAt || age >= 256) continue;
+      f = rinc_frameMs[(rinc_frameAt - 1 - age) & 255] * 6.0f; /* (percent of the budget) */
+      h = (int)(f * 8.0f / 100.0f + 0.5f);
+      if (h > 9) h = 9;
+      if (f > 0 && h < 1) h = 1;
+      for (y = 0; y < h; y++) rinc_overlayDot(x, rinc_OVERLAY_H - 1 - y, f < 50 ? 11 : f <= 100 ? 10 : 8);
+      if (h < 8 && x % 2 == 0) rinc_overlayDot(x, rinc_OVERLAY_H - 9, 5); /* (the budget's line) */
+    }
+  }
+}
+
+/* the system key's combinations, each frame (rinc.h). shift: Shift as the system key: tapped (pressed
+   and let go with nothing else), then pressed again within 0.4 s: the system key while it's held, and for
+   0.7 s after it's let go (so Esc can come after, as browsers keep Shift+Esc). 0 nothing yet, 1 the
+   tap's press, 2 tapped, 3 held as the system key, 4 let go, still the system key for the next key */
+int rinc_systemKey(int sysDown, int shiftDown, int otherDown, int keys) {
+  static int shift, frames, wasShift, wasKeys, held, idle;
+  int pressed = keys & ~wasKeys, go = 0;
   if (frames < 1000) frames++;
-  if (shiftDown && !wasShift) { shift = shift == 2 && frames <= 24 ? 3 : 1; frames = 0; }
-  else if (!shiftDown && wasShift) { shift = shift == 1 && frames <= 24 ? 2 : shift == 3 ? 4 : 0; frames = 0; }
-  else if (shift == 1 && otherDown) shift = 0; /* (Shift held for typing capitals) */
-  else if (shift == 4 && ((otherDown && !escDown) || frames > 42)) shift = 0; /* (another key, or too late) */
-  wasShift = shiftDown;
-  wasEsc = escDown;
-  rinc_systemDown = sysDown || shift >= 3;
-  home = rinc_systemDown && esc; /* (system + Esc: home. Alone, it's nothing, so it isn't pressed by accident) */
-  if (home && shift == 4) shift = 0;
-  if (rinc_systemDown && !rinc_overlayOn) rinc_overlayDraw();
-  rinc_overlayOn = rinc_systemDown && !home;
-  return home;
+  wasKeys = keys;
+  if (rinc_switching) { /* Tab and Shift+Tab move; letting go of a held system key, Enter, or a second untouched switch; Esc doesn't */
+    int n = rinc_recentCount;
+    idle++;
+    if ((pressed & (rinc_SysKey_tab | rinc_SysKey_next | rinc_SysKey_prev)) && n > 0) {
+      int back = (pressed & rinc_SysKey_prev) || ((pressed & rinc_SysKey_tab) && shiftDown && shift != 3);
+      rinc_pick = (rinc_pick + (back ? n - 1 : 1)) % n;
+      idle = 0;
+    }
+    if (pressed & rinc_SysKey_esc) rinc_switching = 0;
+    else if ((pressed & rinc_SysKey_enter) || (held && !sysDown && !(shiftDown && shift == 3)) || (!held && idle > 60)) {
+      rinc_switching = 0;
+      if (rinc_pick > 0 && rinc_pick < n) { snprintf(rinc_launchName, sizeof rinc_launchName, "%s", rinc_recent[rinc_pick]); go = 1; }
+    }
+    if (!rinc_switching) shift = 0;
+    wasShift = shiftDown;
+    rinc_systemDown = rinc_switching || sysDown;
+  } else {
+    if (shiftDown && !wasShift) { shift = shift == 2 && frames <= 24 ? 3 : 1; frames = 0; }
+    else if (!shiftDown && wasShift) { shift = shift == 1 && frames <= 24 ? 2 : shift == 3 ? 4 : 0; frames = 0; }
+    else if (shift == 1 && otherDown) shift = 0; /* (Shift held for typing capitals) */
+    else if (shift == 4 && ((otherDown && !keys) || frames > 42)) shift = 0; /* (another key, or too late) */
+    wasShift = shiftDown;
+    rinc_systemDown = sysDown || shift >= 3;
+    if (rinc_systemDown && pressed) { /* (alone, the system key does nothing, so it isn't pressed by accident) */
+      if (pressed & rinc_SysKey_esc) { snprintf(rinc_launchName, sizeof rinc_launchName, "home"); go = 1; }
+      else if ((pressed & (rinc_SysKey_tab | rinc_SysKey_next | rinc_SysKey_prev)) && rinc_recentCount > 1) {
+        int back = (pressed & rinc_SysKey_prev) || ((pressed & rinc_SysKey_tab) && shiftDown && sysDown); /* (Shift+Tab, with the Windows key or guide) */
+        rinc_switching = 1; rinc_pick = back ? rinc_recentCount - 1 : 1; idle = 0;
+        held = sysDown || shift == 3;
+      } else if (pressed & rinc_SysKey_q) { /* back to the app before, this one forgotten */
+        rinc_recentDrop(0);
+        snprintf(rinc_launchName, sizeof rinc_launchName, "%s", rinc_recentCount ? rinc_recent[0] : "home");
+        go = 1;
+      } else if (pressed & rinc_SysKey_p) rinc_perfOn = !rinc_perfOn;
+      if (shift == 4 && !rinc_switching) shift = 0;
+      rinc_systemDown = sysDown || shift >= 3 || rinc_switching;
+    }
+  }
+  rinc_overlayOn = 0; /* (while it's redrawn) */
+  if (!go && (rinc_systemDown || rinc_switching || rinc_perfOn)) { rinc_overlayDraw(); rinc_overlayOn = 1; }
+  return go;
 }
 
 int rinc_hostProcs(rio_Vm *vm) {
@@ -526,6 +613,7 @@ int rinc_appBegin(rio_Vm *vm, void *space, uint32_t size, const char *name, void
   rinc_consoleClear(1);
   if (rinc_start(vm, space, size, put)) { rinc_say("can't start rio"); rinc_back(); return -1; }
   rinc_setAppName(name);
+  rinc_recentAdd(name);
   return 0;
 }
 void rinc_appFail(const char *name, const char *why) {
@@ -567,8 +655,12 @@ int rinc_appRun(rio_Vm *vm, void *space, uint32_t size, const char *name, const 
 }
 int rinc_gameFrame(rio_Vm *vm) {
   int res;
+  float t0;
   if (!rinc_game) return 1;
-  if ((res = rinc_frame(vm)) != 0) { /* an error, or no update or draw any more */
+  t0 = rinc_time ? rinc_time() : 0;
+  res = rinc_frame(vm);
+  rinc_perfNote(rinc_time ? (rinc_time() - t0) * 1000.0f : 0); /* (for the performance strip) */
+  if (res != 0) { /* an error, or no update or draw any more */
     rinc_game = 0; rinc_showLog = 1; rinc_audioReset(); rinc_consoleClear(1);
     rinc_say(res < 0 ? rio_error(vm) : "nothing to run: define update* or draw*");
     rinc_back();

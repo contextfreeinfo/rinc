@@ -32,13 +32,16 @@ static void rinc_put(const char *s, int n) { fwrite(s, 1, (size_t)n, stdout); ff
 #define rinc_DOWN(k) (rinc_keysDown[(k) >> 3] >> ((k) & 7) & 1)
 
 /* the system key (rinc_systemKey): the Windows key, a controller's Xbox button, or Shift tapped
-   twice. With Esc (or the controller's Back), 1: home */
-static int rinc_homeKey(void) {
+   twice. With Esc (or the controller's Back), Tab, Q or P: 1 to start rinc_launchName */
+static int rinc_systemKeys(void) {
   int k, other = rinc_padButtons != 0;
+  int keys = (rinc_DOWN(HID_KEY_ESCAPE) || (rinc_padButtons & rinc_Button_back) ? rinc_SysKey_esc : 0) | (rinc_DOWN(HID_KEY_TAB) ? rinc_SysKey_tab : 0) |
+             (rinc_DOWN(HID_KEY_Q) ? rinc_SysKey_q : 0) | (rinc_DOWN(HID_KEY_P) ? rinc_SysKey_p : 0) |
+             (rinc_DOWN(HID_KEY_ENTER) || rinc_DOWN(HID_KEY_KEYPAD_ENTER) ? rinc_SysKey_enter : 0) |
+             (rinc_padButtons & rinc_Button_rb ? rinc_SysKey_next : 0) | (rinc_padButtons & rinc_Button_lb ? rinc_SysKey_prev : 0);
   for (k = 0; k < 32; k++) other |= k == (0xE0 >> 3) ? rinc_keysDown[k] & ~0xAA : rinc_keysDown[k]; /* (all but Shift and GUI: E1 E3 E5 E7) */
   return rinc_systemKey(rinc_DOWN(HID_KEY_GUI_LEFT) || rinc_DOWN(HID_KEY_GUI_RIGHT) || rinc_padGuide,
-                        rinc_DOWN(HID_KEY_SHIFT_LEFT) || rinc_DOWN(HID_KEY_SHIFT_RIGHT), other,
-                        rinc_DOWN(HID_KEY_ESCAPE) || (rinc_padButtons & rinc_Button_back) != 0);
+                        rinc_DOWN(HID_KEY_SHIFT_LEFT) || rinc_DOWN(HID_KEY_SHIFT_RIGHT), other, keys);
 }
 
 /* an app's source: from the SD card (read into the app space's top), or else the firmware's bundle.
@@ -99,12 +102,13 @@ static void rinc_frameNow(void) {
   wasConnected = connected;
   rinc_padRead();
   if (stop) { strcpy(rinc_launchName, "console"); rinc_launch = 1; }
-  if (rinc_homeKey()) { strcpy(rinc_launchName, "home"); rinc_launch = 1; } /* (the one key no app gets) */
+  if (rinc_systemKeys()) rinc_launch = 1; /* (the one key no app gets: to rinc_launchName) */
   if (rinc_launch) { rinc_launch = 0; rinc_open(rinc_launchName); return; }
   if (!rinc_game) return;
   rinc_buttons = rinc_padButtons | (uint16_t)(rinc_DOWN(HID_KEY_ARROW_LEFT) * rinc_Button_left | rinc_DOWN(HID_KEY_ARROW_RIGHT) * rinc_Button_right |
     rinc_DOWN(HID_KEY_ARROW_UP) * rinc_Button_up | rinc_DOWN(HID_KEY_ARROW_DOWN) * rinc_Button_down | rinc_DOWN(HID_KEY_V) * rinc_Button_a |
     rinc_DOWN(HID_KEY_C) * rinc_Button_b | rinc_DOWN(HID_KEY_X) * rinc_Button_x | rinc_DOWN(HID_KEY_Z) * rinc_Button_y);
+  if (rinc_systemHeld()) rinc_buttons = 0; /* (a system combination: not the app's) */
   rinc_gameFrame(&rinc_vm); /* (an error goes on the screen) */
   if (rinc_launch) { rinc_launch = 0; rinc_open(rinc_launchName); } /* (pc.launch: after the frame) */
 }

@@ -113,6 +113,20 @@ the app's. It's:
 | combination | |
 |---|---|
 | system + Esc (or a controller's Back) | home, from any app |
+| system + Tab (or a controller's RB) | the switcher: the recent apps, the one before this picked |
+| system + Shift+Tab (or LB) | the switcher, from the other end |
+| system + Q | back to the app before, this one left out of the recent apps |
+| system + P | the performance strip, on or off |
+
+While the system key is held, a strip across the bottom of the screen shows these, apart from the app's
+own screen (which it doesn't change), and the app gets none of the keys or buttons that make them. In
+the switcher, Tab and Shift+Tab (RB and LB) move along the recent apps;
+letting go of the system key, or Enter, switches to the one picked, and Esc stays. (With Shift tapped
+twice and let go, the switcher stays up until Enter, or switches after a second untouched.)
+
+The performance strip shows how long each frame's `update*` and `draw*` take, against the 1/60 s a
+frame has: the latest, and a bar for each of the last few seconds' frames, 8 pixels high for the whole
+1/60 s (green under half of it, yellow up to all of it, red over).
 
 ## The console
 
