@@ -1,5 +1,6 @@
 # Builds and tests on every push and pull request:
-#   web      the VM-only web player (rinc.wasm), with zig: only CI needs zig
+#   web      the web players (rinc.wasm, VM-only, and rinc-full.wasm, with the compiler), with zig: only
+#            CI needs zig
 #   desktop  rinc for Windows, macOS (universal) and Linux, with the web player built in, so rinc -web
 #            and rinc -export work without anything else installed; tests run every app headless
 #   board    rinc.uf2 for the Fruit Jam, with the Pico SDK and Arm's toolchain
@@ -55,11 +56,13 @@ jobs:
         with:
           version: ${{ env.ZIG_VERSION }}
       - name: Build the web player
-        run: python3 tools/web.py --wasm=rinc.wasm
+        run: python3 tools/web.py --wasm=rinc.wasm --wasm-full=rinc-full.wasm
       - uses: actions/upload-artifact@v4
         with:
           name: rinc-wasm
-          path: rinc.wasm
+          path: |
+            rinc.wasm
+            rinc-full.wasm
 
   desktop:
     needs: web
@@ -94,7 +97,7 @@ jobs:
             libdecor-0-dev libdrm-dev libgbm-dev libgl1-mesa-dev libegl1-mesa-dev libdbus-1-dev libudev-dev
       - name: Configure
         shell: bash
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DRINC_PLATFORM=desktop -DRINC_WEB_WASM=rinc.wasm ${{ matrix.flags }}
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DRINC_PLATFORM=desktop -DRINC_WEB_WASM=rinc.wasm -DRINC_WEB_WASM_FULL=rinc-full.wasm ${{ matrix.flags }}
       - name: Build
         run: cmake --build build --config Release --parallel
       - name: Test

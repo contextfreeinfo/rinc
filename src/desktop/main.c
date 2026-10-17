@@ -7,13 +7,14 @@
      -o screen.ppm             instead of a window, afterwards write the screen as an image
      -wav sound.wav            with -frames: the sound those frames made, as a WAV file
      -i app.img                compile to an image (see rio_loadImage) instead, and list the host
-                               procs its code calls (tools/web.py uses both)
+                               procs its code calls
      -export game[.exe]        a copy of this rinc with the app in it, compiled: it runs the app
                                (with the options above, too), so it's a game to hand out
      -runner rinc-linux-x86_64  with -export: copy that rinc instead (another system's, say, from a
                                release), for a game for that system
      -web game.html            one page that plays the app in a browser: the web player (built in
-                               when RINC_WEB_WASM is set) with the app, compiled, all inline
+                               when RINC_WEB_WASM is set; with the compiler, from RINC_WEB_WASM_FULL,
+                               if an app runs Rio itself) with the app, compiled, all inline
      -m                        how near the app comes to its limits, compiling and running (as on
                                every Rinc), instead of running it
      -app console              a built-in app instead of a file: home or console (pc.launch
@@ -84,11 +85,16 @@ static int rinc_compileApp(const char *app, size_t n) {
 
 /* the app compiled, as an image in image[]: its size, or 0 after reporting why not. list: print the
    host procs its code calls, one per line */
+static int rinc_nested; /* whether an app made runs Rio itself (pc.rio*): its page needs the compiler */
 static uint32_t rinc_makeImage(const char *app, size_t n, int list) {
   uint32_t size, pc; uint8_t used[rio_MAX_FFI] = {0}; int k;
   if (rinc_compileApp(app, n)) return 0;
   for (pc = 0; pc < rinc_vm.codeLen; pc++) if (rinc_vm.code[pc].op == rio_Op_ffi && rinc_vm.code[pc].c < rio_MAX_FFI) used[rinc_vm.code[pc].c] = 1;
-  for (k = 0; list && k < rinc_vm.ffiCount; k++) if (used[k]) printf("host %s\n", rinc_vm.ffi[k].name);
+  for (k = 0; k < rinc_vm.ffiCount; k++) {
+    if (!used[k]) continue;
+    if (list) printf("host %s\n", rinc_vm.ffi[k].name);
+    if (!strncmp(rinc_vm.ffi[k].name, "pc.rio", 6)) rinc_nested = 1;
+  }
   if (!(size = rio_saveImage(&rinc_vm, rinc_image, sizeof rinc_image))) fprintf(stderr, "rinc: can't make an image\n");
   return size;
 }
@@ -205,8 +211,8 @@ static int rinc_exportNative(const char *path, const char *runner, uint32_t size
 }
 
 #if rinc_WEB
-extern const unsigned char rinc_webWasm[];
-extern const unsigned rinc_webWasmSize;
+extern const unsigned char rinc_webWasm[], rinc_webWasmFull[]; /* (gzipped) */
+extern const unsigned rinc_webWasmSize, rinc_webWasmFullSize;
 extern const char rinc_webPage[];
 #endif
 /* base64 of b (n long) into out, which has room for 4 * ((n + 2) / 3) characters */
@@ -220,17 +226,20 @@ static size_t rinc_base64(const uint8_t *b, size_t n, char *out) {
   }
   return k;
 }
-/* -web: the page, with the title (the home app's name), the wasm and the bundle in place of {{TITLE}},
-   {{WASM}} and {{APP}} */
+/* -web: the page, with the title (the home app's name), the player (gzipped: with the compiler if an app
+   runs Rio itself) and the bundle in place of {{TITLE}}, {{WASM}} and {{APP}} */
 static int rinc_exportWeb(const char *path, const char *app, uint32_t size) {
 #if rinc_WEB
   const char *p = rinc_webPage, *name = app, *q; char *wasm, *img, title[256]; size_t nw, ni, k = 0; FILE *f; int bad = 0;
+  const unsigned char *player = rinc_nested ? rinc_webWasmFull : rinc_webWasm;
+  unsigned nplayer = rinc_nested ? rinc_webWasmFullSize : rinc_webWasmSize;
+  if (!nplayer) { fprintf(stderr, "rinc: an app runs Rio itself, and this rinc was built without the web player that can (RINC_WEB_WASM_FULL)\n"); return 1; }
   for (q = app; *q; q++) if (*q == '/' || *q == '\\') name = q + 1;
   while (name[k] && name[k] != '.' && k < sizeof title - 1) { title[k] = strchr("<>&\"", name[k]) ? '_' : name[k]; k++; }
   title[k] = 0;
-  wasm = malloc(4 * (rinc_webWasmSize / 3 + 1)); img = malloc(4 * (size / 3 + 1));
+  wasm = malloc(4 * (nplayer / 3 + 1)); img = malloc(4 * (size / 3 + 1));
   if (!wasm || !img || !(f = fopen(path, "wb"))) { free(wasm); free(img); fprintf(stderr, "rinc: can't write %s\n", path); return 1; }
-  nw = rinc_base64(rinc_webWasm, rinc_webWasmSize, wasm); ni = rinc_base64(rinc_bundleBuf, size, img);
+  nw = rinc_base64(player, nplayer, wasm); ni = rinc_base64(rinc_bundleBuf, size, img);
   while (*p) {
     if (!strncmp(p, "{{TITLE}}", 9)) { fputs(title, f); p += 9; }
     else if (!strncmp(p, "{{WASM}}", 8)) { fwrite(wasm, 1, nw, f); p += 8; }

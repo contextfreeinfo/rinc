@@ -13,7 +13,7 @@ infoAt: [64]Int
 infoLen: [64]Int
 titleLen: [64]Int # the part of its first line before the colon (0: none, so the name)
 count := 0
-shown: [65]Int # what's listed: -1 the console, else an app's number
+shown: [64]Int # what's listed: each app's number
 nshown := 0
 filter: Blob[..24]
 pick := 0
@@ -70,19 +70,37 @@ title :: proc(i: Int) -> Blob
   return names[nameAt[i]:nameAt[i] + nameLen[i]]
 end
 
-isConsole :: proc(i: Int) -> Bool
-  return names[nameAt[i]:nameAt[i] + nameLen[i]].asString() == "console"
+# the apps in order of title, ignoring case
+order: [64]Int
+before :: proc(i, j: Int) -> Bool
+  a := title(i)
+  b := title(j)
+  for k in 0..<min(a.len(), b.len())
+    if lower(a[k]) != lower(b[k])
+      return lower(a[k]) < lower(b[k])
+    end
+  end
+  return a.len() < b.len()
+end
+for i in 0..<count
+  order[i] = i
+  j := i
+  for j > 0 and before(order[j], order[j - 1])
+    t := order[j]
+    order[j] = order[j - 1]
+    order[j - 1] = t
+    j -= 1
+  end
 end
 
-# the apps whose name or title has what's typed in it: the console first, where there is one
+# the apps whose name or title has what's typed in it
 narrow :: proc()
   nshown = 0
-  for pass in 0..<2
-    for i in 0..<count
-      if isConsole(i) == (pass == 0) and (has(names[nameAt[i]:nameAt[i] + nameLen[i]]) or has(title(i)))
-        shown[nshown] = i
-        nshown += 1
-      end
+  for k in 0..<count
+    i := order[k]
+    if has(names[nameAt[i]:nameAt[i] + nameLen[i]]) or has(title(i))
+      shown[nshown] = i
+      nshown += 1
     end
   end
   pick = max(0, min(pick, nshown - 1))

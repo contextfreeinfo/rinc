@@ -103,16 +103,22 @@ else()
     target_link_libraries(rinc PRIVATE SDL3::SDL3-static)
     target_compile_definitions(rinc PRIVATE rinc_SDL=1)
   endif()
-  # rinc -web: the web player built in, from a VM-only wasm (python tools/web.py --wasm=rinc.wasm; CI
-  # builds one), so making a page needs neither zig nor Python
+  # rinc -web: the web players built in, gzipped (python tools/web.py --wasm=rinc.wasm
+  # --wasm-full=rinc-full.wasm; CI builds them), so making a page needs neither zig nor Python. A page gets
+  # the VM-only player, unless an app runs Rio itself (pc.rio*): then the one with the compiler
   set(RINC_WEB_WASM "" CACHE FILEPATH "VM-only rinc.wasm to build in, for rinc -web")
+  set(RINC_WEB_WASM_FULL "" CACHE FILEPATH "rinc-full.wasm (with the compiler) to build in, for rinc -web")
   if(RINC_WEB_WASM)
     get_filename_component(wasm ${RINC_WEB_WASM} ABSOLUTE BASE_DIR ${CMAKE_CURRENT_LIST_DIR}) # (relative: to the source)
+    set(full "")
+    if(RINC_WEB_WASM_FULL)
+      get_filename_component(full ${RINC_WEB_WASM_FULL} ABSOLUTE BASE_DIR ${CMAKE_CURRENT_LIST_DIR})
+    endif()
     set(player ${CMAKE_CURRENT_BINARY_DIR}/web_player.c)
     add_custom_command(OUTPUT ${player}
-      COMMAND ${CMAKE_COMMAND} -DWASM=${wasm} -DPAGE=${CMAKE_CURRENT_LIST_DIR}/src/web/page.html -DOUT=${player}
+      COMMAND ${CMAKE_COMMAND} -DWASM=${wasm} -DWASM_FULL=${full} -DPAGE=${CMAKE_CURRENT_LIST_DIR}/src/web/page.html -DOUT=${player}
         -P ${CMAKE_CURRENT_LIST_DIR}/tools/embed.cmake
-      DEPENDS ${wasm} src/web/page.html tools/embed.cmake)
+      DEPENDS ${wasm} ${full} src/web/page.html tools/embed.cmake)
     target_sources(rinc PRIVATE ${player})
     target_compile_definitions(rinc PRIVATE rinc_WEB=1)
   endif()
@@ -166,5 +172,9 @@ else()
   set_tests_properties(export_bundle_runs PROPERTIES DEPENDS export_bundle PASS_REGULAR_EXPRESSION "drawn at")
   if(RINC_WEB_WASM)
     add_test(NAME export_web COMMAND rinc ${CMAKE_CURRENT_LIST_DIR}/apps/breakout.rio -web ${CMAKE_CURRENT_BINARY_DIR}/breakout.html)
+    if(RINC_WEB_WASM_FULL) # (the console runs Rio itself, so its page gets the player with the compiler)
+      add_test(NAME export_web_full COMMAND rinc ${CMAKE_CURRENT_LIST_DIR}/system/home.rio ${CMAKE_CURRENT_LIST_DIR}/system/console.rio
+        -web ${CMAKE_CURRENT_BINARY_DIR}/rinc.html)
+    endif()
   endif()
 endif()

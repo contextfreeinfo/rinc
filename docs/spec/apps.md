@@ -2,7 +2,7 @@
 
 Every app is one Rio file, run as [running apps](running.md) says, with the whole app space to
 itself. A Rinc finds apps in two places: its **storage** (the Fruit Jam's SD card, a folder on the
-desktop), and its **bundle**, the apps it carries with it. Storage comes first, so an app there takes
+desktop, the browser's localStorage), and its **bundle**, the apps it carries with it. Storage comes first, so an app there takes
 the place of a bundled one of the same name.
 
 ## Storage
@@ -93,8 +93,8 @@ Where a Rinc has no storage, an app can't save: these give -1.
 
 ## Home
 
-A Rinc with apps starts at `home` (on the Fruit Jam, `system/home.rio`), which lists the apps, the
-console first where there is one, and starts what's picked with `pc.launch`.
+A Rinc with apps starts at `home` (on the Fruit Jam, `system/home.rio`), which lists the apps in order of
+title, and starts what's picked with `pc.launch`.
 
 ## The system key
 

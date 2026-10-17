@@ -1,6 +1,7 @@
 # The apps as web pages, on GitHub Pages (rincpc.com): each push to main builds the web player and a
-# headless rinc, makes a page of each app (rinc -web), and an index linking them, from each app's first
-# comment line, and the docs (mdbook, from docs/) under /docs.
+# headless rinc, makes a page of each app (rinc -web), a page of the whole Rinc (home, the console and
+# every app), and an index linking them, from each app's first comment line, and the docs (mdbook, from
+# docs/) under /docs.
 name: pages
 
 on:
@@ -29,8 +30,8 @@ jobs:
           version: 0.15.2
       - name: Build the web player and a headless rinc
         run: |
-          python3 tools/web.py --wasm=rinc.wasm
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DRINC_PLATFORM=desktop -DRINC_SDL=OFF -DRINC_WEB_WASM=rinc.wasm
+          python3 tools/web.py --wasm=rinc.wasm --wasm-full=rinc-full.wasm
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DRINC_PLATFORM=desktop -DRINC_SDL=OFF -DRINC_WEB_WASM=rinc.wasm -DRINC_WEB_WASM_FULL=rinc-full.wasm
           cmake --build build --parallel
       - name: Make the pages
         run: |
@@ -41,16 +42,20 @@ jobs:
             echo '<style>body{margin:0;padding:24px 16px;background:#1d2b53;color:#fff1e8;font:16px/1.5 ui-monospace,monospace}'
             echo 'main{max-width:720px;margin:auto}a{color:#ffec27}h1{font-size:22px}li{margin:10px 0}p{color:#c2c3c7}</style>'
             echo '</head><body><main><h1>Rinc apps</h1>'
-            echo '<p>Rinc apps, playing in the browser: the same Rio VM as on the board and the desktop. Arrows and V C X Z, or a controller. <a href="docs/">Docs</a>: making apps, and what a Rinc provides.</p><ul>'
+            echo '<p>Rinc apps, playing in the browser: the same Rio VM as on the board and the desktop. Arrows and V C X Z, or a controller. <a href="docs/">Docs</a>: making apps, and what a Rinc provides.</p>'
+            echo '<p><a href="rinc.html">The whole Rinc</a>: home, the console and every app below, as on the Fruit Jam. What you save stays in this browser. Shift tapped then held, with Esc, goes home.</p><ul>'
+            demos=""
             for app in apps/*.rio; do
               name=$(basename "$app" .rio)
               case $name in bench|micro) continue;; esac # (timings, not demos)
               build/rinc "$app" -web "site/$name.html"
+              demos="$demos $app"
               about=$(head -1 "$app" | sed -e 's/^# *//' -e 's/&/\&amp;/g' -e 's/</\&lt;/g')
               echo "<li><a href=\"$name.html\">$name</a>: $about</li>"
             done
             echo '</ul><p><a href="docs/">Docs</a> &middot; <a href="https://github.com/rincpc/rinc">Source</a></p></main></body></html>'
           } > site/index.html
+          build/rinc system/home.rio system/console.rio $demos -home home -name rinc -web site/rinc.html
           ls -l site
       - name: Make the docs
         run: |
