@@ -18,6 +18,7 @@
 #include "keyboard.h"
 #include "gamepad.h"
 void rinc_sdSetup(void); /* sd.c: the SD card, as rinc_fs */
+extern const uint8_t rinc_firmwareBundle[]; extern const uint32_t rinc_firmwareBundleSize; /* (bundle.c, from RINC_BUNDLE) */
 #include "rinc_audio.h"
 #include "tusb.h" /* (HID key codes) */
 
@@ -35,36 +36,40 @@ static void rinc_say(const char *s) { rinc_put(s, (int)strlen(s)); }
 #define rinc_DOWN(k) (rinc_keysDown[(k) >> 3] >> ((k) & 7) & 1)
 
 /* the system key (rinc_systemKey): the Windows key, a controller's Xbox button, or Shift tapped then
-   held. 1 when it's let go on its own: home */
+   held. With Esc (or the controller's Back), 1: home */
 static int rinc_homeKey(void) {
   int k, other = rinc_padButtons != 0;
   for (k = 0; k < 32; k++) other |= k == (0xE0 >> 3) ? rinc_keysDown[k] & ~0xAA : rinc_keysDown[k]; /* (all but Shift and GUI: E1 E3 E5 E7) */
   return rinc_systemKey(rinc_DOWN(HID_KEY_GUI_LEFT) || rinc_DOWN(HID_KEY_GUI_RIGHT) || rinc_padGuide,
-                        rinc_DOWN(HID_KEY_SHIFT_LEFT) || rinc_DOWN(HID_KEY_SHIFT_RIGHT), other);
+                        rinc_DOWN(HID_KEY_SHIFT_LEFT) || rinc_DOWN(HID_KEY_SHIFT_RIGHT), other,
+                        rinc_DOWN(HID_KEY_ESCAPE) || (rinc_padButtons & rinc_Button_back) != 0);
 }
 
-/* an app's source: built in, or read from the SD card into the app space's top. Its length, or -1 */
+/* an app's source: from the SD card (read into the app space's top), or else the firmware's bundle.
+   Its length, or -1 */
 static int rinc_source(const char *name, const char **src) {
-  char path[96]; uint8_t *at = rinc_appSpace + rinc_APP_SPACE - rinc_MAX_SOURCE; int n = 0, got;
-  if ((*src = rinc_builtinApp(name, &n))) return n;
-  snprintf(path, sizeof path, "/rinc/apps/%s/%s.rio", name, name);
-  if (!rinc_fs || rinc_fs->open(path, 0)) { rinc_say("can't open "); rinc_say(path); rinc_say("\r\n"); return -1; }
-  while (n < rinc_MAX_SOURCE && (got = rinc_fs->read((char *)at + n, rinc_MAX_SOURCE - n)) > 0) n += got;
-  rinc_fs->close();
-  if (n >= rinc_MAX_SOURCE) { rinc_say(path); rinc_say(": too big (64 KB is the most)\r\n"); return -1; }
-  memmove(rinc_appSpace + rinc_APP_SPACE - n, at, (size_t)n); /* (right at the top: all below is the compiler's) */
-  *src = (const char *)rinc_appSpace + rinc_APP_SPACE - n;
-  return n;
+  char *at = (char *)rinc_appSpace + rinc_APP_SPACE - rinc_MAX_SOURCE; const rinc_App *b; int n = rinc_readApp(name, at, rinc_MAX_SOURCE);
+  if (n == -2) { rinc_say(name); rinc_say(".rio: too big (64 KB is the most)\r\n"); return -1; }
+  if (n >= 0) {
+    memmove(rinc_appSpace + rinc_APP_SPACE - n, at, (size_t)n); /* (right at the top: all below is the compiler's) */
+    *src = (const char *)rinc_appSpace + rinc_APP_SPACE - n;
+    return n;
+  }
+  if ((b = rinc_bundled(name))) { *src = b->data; return (int)(b->len ? b->len : strlen(b->data)); }
+  rinc_say("no app named "); rinc_say(name); rinc_say("\r\n");
+  return -1;
 }
 
 /* an app, by name, compiled whole and started: its top-level code, then main; then, if it's a game,
    its frames. On failure (or for an app that isn't a game) its log and error stay on the screen */
 static void rinc_open(const char *name) {
+  name = rinc_appFor(name); /* (home: the card's, else the bundle's) */
   const char *src; int n, fn, res; rio_Usage usage;
   rinc_game = 0; rinc_showLog = 1;
   rinc_audioReset(); rinc_consoleClear(1);
   if (rinc_start(&rinc_vm, rinc_appSpace, rinc_APP_SPACE, rinc_put) || rio_jit(&rinc_vm, rinc_jitCode, sizeof rinc_jitCode) < 0) { rinc_say("can't start rio\r\n"); return; }
   if ((n = rinc_source(name, &src)) < 0) return;
+  rinc_setAppName(name);
   rio_trackUsage(&rinc_vm, &usage);
   if ((res = rinc_compile(&rinc_vm, rinc_appSpace, rinc_APP_SPACE, src, (uint32_t)n)) != 0) {
     rinc_say(name); rinc_say(".rio:"); rinc_say(res > 0 ? " too big (64 KB is the most)" : rio_error(&rinc_vm)); rinc_say("\r\n");
@@ -72,15 +77,15 @@ static void rinc_open(const char *name) {
       static char text[1024]; int k, m = rio_usageText(&usage, text, sizeof text);
       for (k = 0; k < m; k++) rinc_put(text[k] == '\n' ? "\r\n" : text + k, text[k] == '\n' ? 2 : 1);
     }
-    rinc_say("(the Windows key: back home)\r\n");
+    rinc_say("(Windows+Esc: back home)\r\n");
     return;
   }
   if (rio_run(&rinc_vm) || ((fn = rio_findProc(&rinc_vm, "main")) >= 0 && rio_call(&rinc_vm, fn))) {
-    rinc_say(name); rinc_say(".rio:"); rinc_say(rio_error(&rinc_vm)); rinc_say("\r\n(the Windows key: back home)\r\n");
+    rinc_say(name); rinc_say(".rio:"); rinc_say(rio_error(&rinc_vm)); rinc_say("\r\n(Windows+Esc: back home)\r\n");
     return;
   }
   if (rio_findProc(&rinc_vm, "update") >= 0 || rio_findProc(&rinc_vm, "draw") >= 0) { rinc_game = 1; rinc_showLog = 0; }
-  else rinc_say("\r\n(done; the Windows key: back home)\r\n");
+  else rinc_say("\r\n(done; Windows+Esc: back home)\r\n");
 }
 
 /* typing, from the USB keyboard and the serial port, for pc.key(); Ctrl-C over serial (a developer's
@@ -88,6 +93,7 @@ static void rinc_open(const char *name) {
 static int rinc_type(void) {
   int c;
   while (rinc_textRoom() > 8 && (c = rinc_keyboardChar()) >= 0) {
+    if (rinc_systemHeld()) continue; /* (a combination with the system key: not the app's typing) */
     if (c == 27) { /* (Esc itself, or the start of an editing key's escape: ESC [ ...) */
       int d = rinc_keyboardChar();
       if (d == '[') { rinc_textPush(27); rinc_textPush('['); continue; }
@@ -124,7 +130,7 @@ static void rinc_frameNow(void) {
   if (res) { /* an error, or no update or draw any more */
     rinc_game = 0; rinc_showLog = 1; rinc_audioReset(); rinc_consoleClear(1);
     rinc_say(res < 0 ? rio_error(&rinc_vm) : "nothing to run: define update* or draw*");
-    rinc_say("\r\n(the Windows key: back home)\r\n");
+    rinc_say("\r\n(Windows+Esc: back home)\r\n");
   }
   if (rinc_launch) { rinc_launch = 0; rinc_open(rinc_launchName); } /* (pc.launch: after the frame) */
 }
@@ -142,6 +148,7 @@ int main(void) {
   rinc_videoStart(); /* (core 1: video, then sound) */
   rinc_keyboardStart();
   rinc_sdSetup();
+  rinc_bundleRead(rinc_firmwareBundle, rinc_firmwareBundleSize); /* (home and the console, by default; the card's override them) */
   rinc_open("home"); /* (the board starts at home) */
   for (;;) rinc_frameNow();
 }

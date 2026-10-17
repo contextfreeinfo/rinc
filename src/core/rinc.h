@@ -47,9 +47,11 @@ int rinc_compile(rio_Vm *vm, void *space, uint32_t size, const char *src, uint32
 int rinc_atLimit(const char *error); /* is this compile error about running out of something? */
 /* the system key (docs/spec/apps.md): the Windows key or a controller's guide button (sysDown), or,
    where the system around Rinc keeps the Windows key, Shift tapped and then pressed again and held.
-   It acts when it's let go, unless another key was pressed with it (combinations are for other things).
-   Call each frame with what's down (otherDown: any other key): 1 when it acts (home) */
-int rinc_systemKey(int sysDown, int shiftDown, int otherDown);
+   Held, it makes combinations: with Esc (escDown: Esc, or a controller's Back), home. Call each frame
+   with what's down (otherDown: any other key): 1 for home. While it's held (rinc_systemHeld), what's
+   typed isn't the app's */
+int rinc_systemKey(int sysDown, int shiftDown, int otherDown, int escDown);
+int rinc_systemHeld(void);
 /* one frame of a game: the app's update* and then draw* (each optional). 0: ran, 1: the app has
    neither (it isn't a game), -1: a runtime error (rio_error says) */
 int rinc_frame(rio_Vm *vm);
@@ -100,9 +102,34 @@ extern const rinc_Fs *rinc_fs;
    "home" or "console". The platform does it, after the frame, and sets rinc_launch back to 0 */
 extern int rinc_launch;
 extern char rinc_launchName[33];
-/* the built-in apps' sources (system/home.rio and system/console.rio, built in where there are
-   apps), or NULL for a name that isn't one */
-const char *rinc_builtinApp(const char *name, int *len);
+/* the apps a Rinc carries with it, its bundle (docs/spec/apps.md#bundles), in one format everywhere:
+   the Fruit Jam's firmware has one built in (RINC_BUNDLE: home and the console, by default), an exported
+   desktop program has one at its end, and a web page has one in it. Storage, where there is some, comes
+   first, by name. Each app is a source, or (image: 1) a compiled Rio image; info is its description
+   (for a source, its first line, without the #) */
+#define rinc_BUNDLE_MAGIC "RINCBUN1"
+#define rinc_BUNDLE_MOST 256 /* (files) */
+/* a bundle is files, by path as in storage without /rinc/ (apps/chord/chord.rio, apps/chord/assets/...):
+   an app is apps/name/name.rio (a source), or apps/name/name.img (a compiled image, its description in
+   apps/name/name.info) */
+typedef struct { const char *path, *data; uint32_t len; } rinc_File;
+typedef struct { char name[33], info[97]; const char *data; uint32_t len; int image; } rinc_App;
+/* takes a bundle, which stays where it is: 0, or -1 if it isn't one */
+int rinc_bundleRead(const void *bundle, uint32_t size);
+/* writes one: name, its storage folder's name ("" for Rinc's own); home, its home app's name. Its size,
+   or 0 if it doesn't fit in cap */
+uint32_t rinc_bundleWrite(uint8_t *out, uint32_t cap, const char *name, const char *home, const rinc_File *files, int n);
+const rinc_File *rinc_bundleFile(const char *path); /* NULL if the bundle has no such file */
+const rinc_App *rinc_bundled(const char *name); /* NULL if the bundle has no such app */
+const char *rinc_bundleName(void); /* the bundle's storage folder's name ("": Rinc's own) */
+/* the app "home" means: an app named home in storage, else the bundle's home app; and any other name,
+   itself */
+const char *rinc_appFor(const char *name);
+/* an app's source from storage, read into buf: its length, -1 if storage has no such app, or -2 if it
+   doesn't fit */
+int rinc_readApp(const char *name, char *buf, uint32_t cap);
+/* the app running now, by name: its save space is /rinc/save/<name> (pc.saveRead and so on) */
+void rinc_setAppName(const char *name);
 
 /* a REPL over any text stream: feed it characters, it echoes them and runs each complete input.
    Besides rio, it knows a few commands, each a line on its own: run (the game loop, for what's been

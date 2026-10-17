@@ -22,8 +22,8 @@ When a Rio change is pushed, move the submodule to it: `git -C lib/rio pull`, an
 
 ## CI and releases
 
-`.github/workflows/ci.yml` builds and tests on every push: the web player's wasm (with zig), the
-desktop rinc for Windows, macOS (universal) and Linux with that wasm built in (each runs the tests), and
+`.github/workflows/ci.yml` builds and tests on every push: the web players' wasm (with zig), the
+desktop rinc for Windows, macOS (universal) and Linux with those built in (each runs the tests), and
 `rinc.uf2` for the Fruit Jam (Arm's toolchain and the Pico SDK). Each is kept as a download on the run. A
 tag like `v0.1.0` also publishes them as a GitHub release. Each night that `main` has changed, and
 whenever the ci workflow is run by hand (Actions > ci > Run workflow), they're published as the rolling

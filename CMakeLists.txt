@@ -44,16 +44,6 @@ target_link_libraries(rinccore PUBLIC riocore)
 if(NOT MSVC)
   target_compile_options(rinccore PRIVATE -Wall -Wextra)
 endif()
-# the built-in apps, ordinary apps built in (apps.c): home, where the board starts, and the console
-foreach(app home console)
-  set(src ${CMAKE_CURRENT_BINARY_DIR}/${app}_src.c)
-  add_custom_command(OUTPUT ${src}
-    COMMAND ${CMAKE_COMMAND} -DIN=${CMAKE_CURRENT_LIST_DIR}/system/${app}.rio -DOUT=${src} -DNAME=rinc_${app}Src
-      -P ${CMAKE_CURRENT_LIST_DIR}/tools/embed_text.cmake
-    DEPENDS system/${app}.rio tools/embed_text.cmake)
-  target_sources(rinccore PRIVATE ${src})
-endforeach()
-target_sources(rinccore PRIVATE src/core/apps.c)
 
 if(RINC_PLATFORM STREQUAL rp2350)
   target_compile_definitions(riocore PUBLIC rio_SMALL rio_MAX_FFI=64) # MCU-sized fixed caps, but room for Rinc's host procs
@@ -66,7 +56,17 @@ if(RINC_PLATFORM STREQUAL rp2350)
   # sources compiled here (tinyusb_host would turn the native port into a host too: it stays a device,
   # for the serial port); tusb_config.h in src/rp2350 configures both
   set(TUSB ${PICO_SDK_PATH}/lib/tinyusb/src)
-  add_executable(rinc src/rp2350/main.c src/rp2350/video.c src/rp2350/keyboard.c src/rp2350/audio.c src/rp2350/hdmi_packet.c src/rp2350/gamepad.c src/rp2350/sd.c
+  # the firmware's bundle (docs/spec/apps.md#bundles): the apps it carries, home and the console by
+  # default (the SD card's apps of the same names take their place); RINC_HOME is the one home means
+  set(RINC_BUNDLE "${CMAKE_CURRENT_LIST_DIR}/system/home.rio|${CMAKE_CURRENT_LIST_DIR}/system/console.rio" CACHE STRING
+    "the firmware's apps, their .rio files, separated by |")
+  set(RINC_HOME "" CACHE STRING "the firmware's home app, by name (by default the only app, else one named home)")
+  string(REPLACE "|" ";" bundleApps "${RINC_BUNDLE}")
+  set(bundle ${CMAKE_CURRENT_BINARY_DIR}/bundle.c)
+  add_custom_command(OUTPUT ${bundle}
+    COMMAND ${CMAKE_COMMAND} "-DAPPS=${RINC_BUNDLE}" -DHOME=${RINC_HOME} -DOUT=${bundle} -P ${CMAKE_CURRENT_LIST_DIR}/tools/bundle.cmake
+    DEPENDS ${bundleApps} tools/bundle.cmake VERBATIM)
+  add_executable(rinc ${bundle} src/rp2350/main.c src/rp2350/video.c src/rp2350/keyboard.c src/rp2350/audio.c src/rp2350/hdmi_packet.c src/rp2350/gamepad.c src/rp2350/sd.c
     lib/fatfs/ff.c lib/fatfs/ffunicode.c
     ${TUSB}/host/usbh.c ${TUSB}/host/hub.c ${TUSB}/class/hid/hid_host.c ${TUSB}/portable/raspberrypi/pio_usb/hcd_pio_usb.c)
   target_include_directories(rinc BEFORE PRIVATE src/rp2350 lib/fatfs) # (sd.c: the SD card, through FatFs)
@@ -84,7 +84,7 @@ if(RINC_PLATFORM STREQUAL rp2350)
     add_custom_target(flash COMMAND picotool load -f -x $<TARGET_FILE:rinc> DEPENDS rinc USES_TERMINAL)
   endif()
 else()
-  add_executable(rinc src/desktop/main.c)
+  add_executable(rinc src/desktop/main.c src/desktop/files.c src/desktop/about.c)
   target_link_libraries(rinc PRIVATE rinccore)
   # the window: SDL3, built from source here and linked in statically, for a single binary
   option(RINC_SDL "a window, through SDL3 (off: headless only)" ON)
@@ -103,16 +103,22 @@ else()
     target_link_libraries(rinc PRIVATE SDL3::SDL3-static)
     target_compile_definitions(rinc PRIVATE rinc_SDL=1)
   endif()
-  # rinc -web: the web player built in, from a VM-only wasm (python tools/web.py --wasm=rinc.wasm; CI
-  # builds one), so making a page needs neither zig nor Python
+  # rinc -web: the web players built in, gzipped (python tools/web.py --wasm=rinc.wasm
+  # --wasm-full=rinc-full.wasm; CI builds them), so making a page needs neither zig nor Python. A page gets
+  # the VM-only player, unless an app runs Rio itself (pc.rio*): then the one with the compiler
   set(RINC_WEB_WASM "" CACHE FILEPATH "VM-only rinc.wasm to build in, for rinc -web")
+  set(RINC_WEB_WASM_FULL "" CACHE FILEPATH "rinc-full.wasm (with the compiler) to build in, for rinc -web")
   if(RINC_WEB_WASM)
     get_filename_component(wasm ${RINC_WEB_WASM} ABSOLUTE BASE_DIR ${CMAKE_CURRENT_LIST_DIR}) # (relative: to the source)
+    set(full "")
+    if(RINC_WEB_WASM_FULL)
+      get_filename_component(full ${RINC_WEB_WASM_FULL} ABSOLUTE BASE_DIR ${CMAKE_CURRENT_LIST_DIR})
+    endif()
     set(player ${CMAKE_CURRENT_BINARY_DIR}/web_player.c)
     add_custom_command(OUTPUT ${player}
-      COMMAND ${CMAKE_COMMAND} -DWASM=${wasm} -DPAGE=${CMAKE_CURRENT_LIST_DIR}/src/web/page.html -DOUT=${player}
+      COMMAND ${CMAKE_COMMAND} -DWASM=${wasm} -DWASM_FULL=${full} -DPAGE=${CMAKE_CURRENT_LIST_DIR}/src/web/page.html -DOUT=${player}
         -P ${CMAKE_CURRENT_LIST_DIR}/tools/embed.cmake
-      DEPENDS ${wasm} src/web/page.html tools/embed.cmake)
+      DEPENDS ${wasm} ${full} src/web/page.html tools/embed.cmake)
     target_sources(rinc PRIVATE ${player})
     target_compile_definitions(rinc PRIVATE rinc_WEB=1)
   endif()
@@ -126,10 +132,17 @@ else()
     add_test(NAME app_${name} COMMAND rinc ${app} -frames 180 -o ${CMAKE_CURRENT_BINARY_DIR}/${name}.ppm)
   endforeach()
   # the built-in apps: home runs, and the console, typed at, runs Rio and its commands
-  add_test(NAME app_home COMMAND rinc -app home -frames 30)
-  add_test(NAME app_console COMMAND rinc -app console -frames 60
+  # storage in a folder of the tests' own (never the user's): apps installed there, then run by name
+  set(data ${CMAKE_CURRENT_BINARY_DIR}/test-data)
+  add_test(NAME install COMMAND rinc -data ${data} -install ${CMAKE_CURRENT_LIST_DIR}/system/home.rio
+    ${CMAKE_CURRENT_LIST_DIR}/system/console.rio ${CMAKE_CURRENT_LIST_DIR}/apps/hello.rio)
+  add_test(NAME app_by_name COMMAND rinc -data ${data} -app hello -frames 2)
+  set_tests_properties(app_by_name PROPERTIES DEPENDS install PASS_REGULAR_EXPRESSION "drawn at")
+  add_test(NAME app_home COMMAND rinc -data ${data} -frames 30)
+  set_tests_properties(app_home PROPERTIES DEPENDS install)
+  add_test(NAME app_console COMMAND rinc -data ${data} -app console -frames 60
     -type "x := 6 * 7\\nsq :: proc(n: Int) -> Int\\nreturn n * n\\nend\\nsq(x)\\nnope\\nls\\n")
-  set_tests_properties(app_console PROPERTIES PASS_REGULAR_EXPRESSION "1764[\r\n]+> nope[\r\n]+1:1: undefined name")
+  set_tests_properties(app_console PROPERTIES DEPENDS install PASS_REGULAR_EXPRESSION "1764[\r\n]+> nope[\r\n]+1:1: undefined name")
   # an app's memory: the -m report
   add_test(NAME memory_report COMMAND rinc ${CMAKE_CURRENT_LIST_DIR}/apps/chord.rio -m)
   set_tests_properties(memory_report PROPERTIES PASS_REGULAR_EXPRESSION "fits in the 256 KB app space")
@@ -144,7 +157,7 @@ else()
   find_package(Python3 COMPONENTS Interpreter)
   if(Python3_FOUND AND EXISTS ${RIO_DIR}/tests/docs.py)
     add_test(NAME docs COMMAND Python3::Interpreter ${RIO_DIR}/tests/docs.py $<TARGET_FILE:rinc>
-      ${CMAKE_CURRENT_LIST_DIR}/docs ${CMAKE_CURRENT_LIST_DIR}/README.md -- -frames 2)
+      ${CMAKE_CURRENT_LIST_DIR}/docs ${CMAKE_CURRENT_LIST_DIR}/README.md -- -frames 2 -data ${CMAKE_CURRENT_BINARY_DIR}/docs-data)
     set_tests_properties(docs PROPERTIES PASS_REGULAR_EXPRESSION "all [0-9]+ doc examples passed")
   endif()
   # pc.rio, the host procs written out, matches what rinc registers
@@ -152,7 +165,16 @@ else()
   target_link_libraries(rinc_pc_test PRIVATE rinccore)
   add_test(NAME pc_declared COMMAND rinc_pc_test ${CMAKE_CURRENT_LIST_DIR}/src/core/pc.rio)
   set_tests_properties(pc_declared PROPERTIES PASS_REGULAR_EXPRESSION "pc.rio declares all [0-9]+ host procs")
+  # a bundle of two apps, exported: it starts at the one -home names
+  set(pair ${CMAKE_CURRENT_BINARY_DIR}/pair-game${CMAKE_EXECUTABLE_SUFFIX})
+  add_test(NAME export_bundle COMMAND rinc ${CMAKE_CURRENT_LIST_DIR}/apps/bounce.rio ${CMAKE_CURRENT_LIST_DIR}/apps/hello.rio -export ${pair} -home hello)
+  add_test(NAME export_bundle_runs COMMAND ${pair} -frames 2 -data ${CMAKE_CURRENT_BINARY_DIR}/pair-data)
+  set_tests_properties(export_bundle_runs PROPERTIES DEPENDS export_bundle PASS_REGULAR_EXPRESSION "drawn at")
   if(RINC_WEB_WASM)
     add_test(NAME export_web COMMAND rinc ${CMAKE_CURRENT_LIST_DIR}/apps/breakout.rio -web ${CMAKE_CURRENT_BINARY_DIR}/breakout.html)
+    if(RINC_WEB_WASM_FULL) # (the console runs Rio itself, so its page gets the player with the compiler)
+      add_test(NAME export_web_full COMMAND rinc ${CMAKE_CURRENT_LIST_DIR}/system/home.rio ${CMAKE_CURRENT_LIST_DIR}/system/console.rio
+        -web ${CMAKE_CURRENT_BINARY_DIR}/rinc.html)
+    endif()
   endif()
 endif()

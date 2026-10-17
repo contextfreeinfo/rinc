@@ -1,4 +1,23 @@
 <!doctype html>
+<!-- Made with Rinc (https://rincpc.com/), CC0. The player (the wasm below) includes parts of wasi-libc,
+from musl, under the MIT license:
+
+Copyright (c) 2005-2020 Rich Felker, et al.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the "Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the
+following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial
+portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
+LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO
+EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR
+THE USE OR OTHER DEALINGS IN THE SOFTWARE. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -16,6 +35,7 @@ canvas { position: absolute; inset: 0; margin: auto; image-rendering: pixelated;
 <script>
 (async () => {
   const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+  const gunzip = async b => new Uint8Array(await new Response(new Blob([b]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer());
   const canvas = document.querySelector("canvas"), ctx = canvas.getContext("2d"), image = ctx.createImageData(320, 240);
   const err = document.getElementById("err"), t0 = performance.now(), app = b64("{{APP}}");
   let ex, out = "";
@@ -25,7 +45,50 @@ canvas { position: absolute; inset: 0; margin: auto; image-rendering: pixelated;
     put: (p, n) => { out += text(p, n); const lines = out.split("\n"); out = lines.pop(); lines.forEach(l => console.log(l)); },
     now: () => (performance.now() - t0) / 1000,
   };
-  ex = (await WebAssembly.instantiate(b64("{{WASM}}"), { env })).instance.exports;
+  // storage: a file is a localStorage key (its path, under the bundle's storage name), its bytes as a
+  // string of char codes 0 to 255; one file open at a time, as on every Rinc
+  let file = null;
+  const keys_ = () => { try { const a = []; for (let i = 0; i < localStorage.length; i++) a.push(localStorage.key(i)); return a; } catch (e) { return []; } };
+  const getItem = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  env.fs_open = (p, n, write) => {
+    const k = text(p, n), v = write ? "" : getItem(k);
+    if (v === null) return -1;
+    file = write ? { k, parts: [] } : { k, bytes: Uint8Array.from(v, c => c.charCodeAt(0)), at: 0 };
+    return 0;
+  };
+  env.fs_read = (p, n) => {
+    if (!file || !file.bytes) return -1;
+    const m = Math.min(n, file.bytes.length - file.at);
+    new Uint8Array(ex.memory.buffer, p, m).set(file.bytes.subarray(file.at, file.at + m)); file.at += m;
+    return m;
+  };
+  env.fs_write = (p, n) => {
+    if (!file || !file.parts) return -1;
+    const b = new Uint8Array(ex.memory.buffer, p, n);
+    for (let i = 0; i < n; i += 8192) file.parts.push(String.fromCharCode(...b.subarray(i, i + 8192)));
+    return n;
+  };
+  env.fs_close = () => {
+    const f = file; file = null;
+    if (!f) return -1;
+    if (f.parts) try { localStorage.setItem(f.k, f.parts.join("")); } catch (e) { return -1; }
+    return 0;
+  };
+  env.fs_list = (p, n, o, cap) => { // each name under a folder: "d name" or "f name", a line each
+    const dir = text(p, n) + "/", seen = new Map();
+    keys_().forEach(k => { if (k.startsWith(dir)) { const rest = k.slice(dir.length), s = rest.indexOf("/"); seen.set(s < 0 ? rest : rest.slice(0, s), s >= 0); } });
+    if (!seen.size) return -1;
+    const t = new TextEncoder().encode([...seen].map(([k, d]) => (d ? "d " : "f ") + k + "\n").join("")), m = Math.min(t.length, cap);
+    new Uint8Array(ex.memory.buffer, o, m).set(t.subarray(0, m));
+    return m;
+  };
+  env.fs_remove = (p, n) => {
+    const k = text(p, n);
+    if (getItem(k) === null) return -1;
+    try { localStorage.removeItem(k); } catch (e) { return -1; }
+    return 0;
+  };
+  ex = (await WebAssembly.instantiate(await gunzip(b64("{{WASM}}")), { env })).instance.exports;
   ex._initialize();
   new Uint8Array(ex.memory.buffer, ex.source(), app.length).set(app);
   const draw = () => { image.data.set(new Uint8Array(ex.memory.buffer, ex.pixels(), 320 * 240 * 4)); ctx.putImageData(image, 0, 0); };
@@ -69,8 +132,10 @@ canvas { position: absolute; inset: 0; margin: auto; image-rendering: pixelated;
   let buttons = 0, next = performance.now(), game = true;
   // a controller, in the browser's standard layout (Xbox's): its buttons as Rinc's, sticks and triggers
   const padBits = [16, 32, 64, 128, 256, 512, 0, 0, 8192, 4096, 1024, 2048, 4, 8, 1, 2];
+  const pad = { back: false, guide: false };
   const gamepad = () => {
     const p = [...(navigator.getGamepads ? navigator.getGamepads() : [])].find(g => g && g.mapping === "standard");
+    pad.back = !!(p && p.buttons[8] && p.buttons[8].pressed); pad.guide = !!(p && p.buttons[16] && p.buttons[16].pressed);
     if (!p) { ex.axes(0, 0, 0, 0, 0, 0); return 0; }
     let b = 0;
     p.buttons.forEach((x, i) => { if (x.pressed && padBits[i]) b |= padBits[i]; });
@@ -78,16 +143,27 @@ canvas { position: absolute; inset: 0; margin: auto; image-rendering: pixelated;
     ex.axes(s(p.axes[0]), s(p.axes[1]), s(p.axes[2]), s(p.axes[3]), s(p.buttons[6] && p.buttons[6].value), s(p.buttons[7] && p.buttons[7].value));
     return b;
   };
+  // key(): typing, editing keys and Ctrl+letter; and the keys held, for the system key (Shift tapped
+  // then held, with Esc: home)
+  const editing = { ArrowLeft: 128, ArrowRight: 129, ArrowUp: 130, ArrowDown: 131, Home: 132, End: 133, Delete: 134, PageUp: 135, PageDown: 136, Tab: 9, Escape: 27 };
+  const held = new Set();
   addEventListener("keydown", e => {
+    held.add(e.code);
     if (keys[e.code]) { buttons |= keys[e.code]; e.preventDefault(); }
-    const c = e.key.length === 1 ? e.key.charCodeAt(0) : e.key === "Enter" ? 13 : e.key === "Backspace" ? 8 : 0; // key(): typing
+    if (editing[e.key]) { ex.key(editing[e.key]); if (e.key === "Tab" || e.key === "Home" || e.key === "End" || e.key.startsWith("Page")) e.preventDefault(); return; }
+    if (e.ctrlKey && !e.metaKey && /^[a-z]$/i.test(e.key)) { ex.key(e.key.toLowerCase().charCodeAt(0) - 96); e.preventDefault(); return; }
+    const c = e.key.length === 1 ? e.key.charCodeAt(0) : e.key === "Enter" ? 13 : e.key === "Backspace" ? 8 : 0;
     if (c && c < 127 && !e.ctrlKey && !e.metaKey) { ex.typed(c); if (c === 8) e.preventDefault(); }
   });
-  addEventListener("keyup", e => { if (keys[e.code]) buttons &= ~keys[e.code]; });
-  addEventListener("blur", () => { buttons = 0; });
+  addEventListener("keyup", e => { held.delete(e.code); if (keys[e.code]) buttons &= ~keys[e.code]; });
+  addEventListener("blur", () => { buttons = 0; held.clear(); });
+  const systemKeys = pad => {
+    const shift = held.has("ShiftLeft") || held.has("ShiftRight"), other = [...held].some(k => !k.startsWith("Shift") && k !== "Escape");
+    return (shift ? 1 : 0) | (other ? 2 : 0) | (held.has("Escape") || pad.back ? 4 : 0) | (pad.guide ? 8 : 0);
+  };
   const tick = now => {
     while (game && now >= next) { // 60 frames a second, whatever the display's rate
-      const r = ex.frame(buttons | gamepad());
+      const b = buttons | gamepad(), r = ex.frame(b, systemKeys(pad));
       if (r) { game = false; if (r < 0) fail(ex.error()); }
       if (!node) mixed(800); // (no sound yet: keep time anyway)
       next += 1000 / 60;

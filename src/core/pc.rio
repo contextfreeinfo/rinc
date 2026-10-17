@@ -54,6 +54,14 @@ appSource* :: @host proc(name: String, out: Blob) -> Int
 appSave* :: @host proc(name: String, text: String) -> Int   # 0, or -1
 appDelete* :: @host proc(name: String) -> Int               # 0, or -1
 
+# ---------------------------------------------------------------- this app's own files: /rinc/save/<app>
+
+# a file's contents into out, as much as fits: its whole length, or -1 if there's no such file. Names are
+# 1 to 32 letters, digits, _, - and . (not first)
+saveRead* :: @host proc(file: String, out: Blob) -> Int
+saveWrite* :: @host proc(file: String, data: String) -> Int  # 0, or -1
+saveDelete* :: @host proc(file: String) -> Int               # 0, or -1
+
 # ---------------------------------------------------------------- Rio inside an app: a session
 
 # a fresh session, for a console or an editor: its code and data in mem, its compiler's tables in
