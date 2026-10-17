@@ -2,7 +2,7 @@
      rinc                       a Rio REPL in the terminal
      rinc app.rio               run an app in a window: its top-level code and main, then update* and
                                draw* 60 times a second if it's a game (arrows, V C X Z: btn; Shift
-                               tapped then held: home; closing the window quits)
+                               tapped then held, with Esc: home; closing the window quits)
      -frames n                 instead of a window, run n frames (A held for the first few)
      -o screen.ppm             instead of a window, afterwards write the screen as an image
      -wav sound.wav            with -frames: the sound those frames made, as a WAV file
@@ -100,9 +100,20 @@ static int rinc_writeFile(const char *path, const void *a, size_t an, const void
   return 0;
 }
 
-/* -export: this program's own file, with an image after it and then a trailer: its size (4 bytes,
-   little-endian) and rinc_MAGIC. At startup rinc looks for one (so an app in it runs instead of the REPL) */
-#define rinc_MAGIC "RINCAPP0"
+/* an app's name from its file: hello for apps/hello.rio */
+static void rinc_stem(const char *path, char *out, size_t cap) {
+  const char *base = path, *p, *dot; size_t n;
+  for (p = path; *p; p++) if (*p == '/' || *p == '\\') base = p + 1;
+  dot = strstr(base, ".rio");
+  n = dot ? (size_t)(dot - base) : strlen(base);
+  if (n >= cap) n = cap - 1;
+  memcpy(out, base, n); out[n] = 0;
+}
+
+/* -export: this program's own file, with a bundle after it (docs/spec/apps.md#bundles) and then a
+   trailer: the bundle's size (4 bytes, little-endian) and its magic again. At startup rinc looks for one,
+   and runs its home app in place of the REPL */
+static uint8_t rinc_bundleBuf[2 << 20], rinc_images[2 << 20];
 static char *rinc_readAll(const char *path, size_t *len) {
   FILE *f; char *b; long n;
   if (!(f = fopen(path, "rb"))) return 0;
@@ -124,19 +135,68 @@ static char *rinc_selfFile(size_t *len) {
 #endif
   return rinc_readAll(path, len);
 }
-/* the size of an app at the end of file b (n long), or 0 if there's none */
+/* the size of a bundle at the end of file b (n long), or 0 if there's none */
 static uint32_t rinc_carried(const char *b, size_t n) {
   uint32_t k;
-  if (n < 12 || memcmp(b + n - 8, rinc_MAGIC, 8)) return 0;
+  if (n < 12 || memcmp(b + n - 8, rinc_BUNDLE_MAGIC, 8)) return 0;
   memcpy(&k, b + n - 12, 4);
-  return k <= n - 12 && k <= sizeof rinc_image ? k : 0;
+  return k <= n - 12 && k <= sizeof rinc_bundleBuf ? k : 0;
+}
+
+/* apps (their .rio files), each compiled to an image, as a bundle in rinc_bundleBuf: home names the app
+   home means (by default the only one, or one named home), and name the storage folder (by default the
+   home app's). Its size, or 0 after saying why not */
+static uint32_t rinc_makeBundle(const char *const *apps, int n, const char *home, const char *name) {
+  static rinc_App list[rinc_BUNDLE_MOST];
+  uint32_t used = 0, size; int i, k;
+  if (n > rinc_BUNDLE_MOST / 2) { fprintf(stderr, "rinc: a bundle has %d apps at most\n", rinc_BUNDLE_MOST / 2); return 0; }
+  for (i = 0; i < n; i++) {
+    rinc_App *a = &list[i]; FILE *f = fopen(apps[i], "rb"); size_t len; const char *line;
+    if (!f) { fprintf(stderr, "rinc: can't open %s\n", apps[i]); return 0; }
+    len = fread(rinc_src, 1, sizeof rinc_src, f); fclose(f);
+    rinc_stem(apps[i], a->name, sizeof a->name);
+    for (k = 0; k < i; k++) if (!strcmp(list[k].name, a->name)) { fprintf(stderr, "rinc: two apps named %s\n", a->name); return 0; }
+    a->info[0] = 0; /* (its description: the first line, without the #) */
+    if (len && rinc_src[0] == '#') {
+      for (line = rinc_src + 1; *line == ' '; line++) {}
+      for (k = 0; k < (int)sizeof a->info - 1 && line + k < rinc_src + len && line[k] != '\n' && line[k] != '\r'; k++) a->info[k] = line[k];
+      a->info[k] = 0;
+    }
+    rinc_setAppName(a->name);
+    if (rinc_start(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, rinc_put) || !(size = rinc_makeImage(apps[i], len, 0))) return 0;
+    if (size > sizeof rinc_images - used) { fprintf(stderr, "rinc: too much to bundle\n"); return 0; }
+    memcpy(rinc_images + used, rinc_image, size);
+    a->data = (const char *)rinc_images + used; a->len = size; a->image = 1;
+    used += size;
+  }
+  if (!home) { /* (the only app, or one named home) */
+    for (i = 0; i < n && strcmp(list[i].name, "home"); i++) {}
+    if (n == 1) home = list[0].name;
+    else if (i < n) home = "home";
+    else { fprintf(stderr, "rinc: which app is home? (-home name)\n"); return 0; }
+  }
+  for (i = 0; i < n && strcmp(list[i].name, home); i++) {}
+  if (i == n) { fprintf(stderr, "rinc: -home %s isn't one of the apps\n", home); return 0; }
+  { /* the files: apps/name/name.img, and apps/name/name.info for a description */
+    static rinc_File files[rinc_BUNDLE_MOST]; static char paths[rinc_BUNDLE_MOST][96]; int nf = 0;
+    for (i = 0; i < n; i++) {
+      snprintf(paths[nf], sizeof paths[nf], "apps/%.32s/%.32s.img", list[i].name, list[i].name);
+      files[nf].path = paths[nf]; files[nf].data = list[i].data; files[nf++].len = list[i].len;
+      if (!list[i].info[0]) continue;
+      snprintf(paths[nf], sizeof paths[nf], "apps/%.32s/%.32s.info", list[i].name, list[i].name);
+      files[nf].path = paths[nf];
+      files[nf].data = list[i].info; files[nf++].len = (uint32_t)strlen(list[i].info);
+    }
+    if (!(size = rinc_bundleWrite(rinc_bundleBuf, sizeof rinc_bundleBuf, name ? name : home, home, files, nf))) fprintf(stderr, "rinc: too much to bundle\n");
+  }
+  return size;
 }
 static int rinc_exportNative(const char *path, const char *runner, uint32_t size) {
   size_t n; char *self = runner ? rinc_readAll(runner, &n) : rinc_selfFile(&n), tail[12]; int r;
   if (!self) { fprintf(stderr, runner ? "rinc: can't read %s\n" : "rinc: can't read my own program file\n", runner); return 1; }
-  if (rinc_carried(self, n)) n -= rinc_carried(self, n) + 12; /* (exporting from an export: just this app) */
-  memcpy(tail, &size, 4); memcpy(tail + 4, rinc_MAGIC, 8);
-  r = rinc_writeFile(path, self, n, rinc_image, size, tail, 12);
+  if (rinc_carried(self, n)) n -= rinc_carried(self, n) + 12; /* (exporting from an export: just this bundle) */
+  memcpy(tail, &size, 4); memcpy(tail + 4, rinc_BUNDLE_MAGIC, 8);
+  r = rinc_writeFile(path, self, n, rinc_bundleBuf, size, tail, 12);
   free(self);
 #ifndef _WIN32
   if (!r) chmod(path, 0755);
@@ -160,7 +220,7 @@ static size_t rinc_base64(const uint8_t *b, size_t n, char *out) {
   }
   return k;
 }
-/* -web: the page, with the title (the app's name), the wasm and the image in place of {{TITLE}},
+/* -web: the page, with the title (the home app's name), the wasm and the bundle in place of {{TITLE}},
    {{WASM}} and {{APP}} */
 static int rinc_exportWeb(const char *path, const char *app, uint32_t size) {
 #if rinc_WEB
@@ -170,7 +230,7 @@ static int rinc_exportWeb(const char *path, const char *app, uint32_t size) {
   title[k] = 0;
   wasm = malloc(4 * (rinc_webWasmSize / 3 + 1)); img = malloc(4 * (size / 3 + 1));
   if (!wasm || !img || !(f = fopen(path, "wb"))) { free(wasm); free(img); fprintf(stderr, "rinc: can't write %s\n", path); return 1; }
-  nw = rinc_base64(rinc_webWasm, rinc_webWasmSize, wasm); ni = rinc_base64(rinc_image, size, img);
+  nw = rinc_base64(rinc_webWasm, rinc_webWasmSize, wasm); ni = rinc_base64(rinc_bundleBuf, size, img);
   while (*p) {
     if (!strncmp(p, "{{TITLE}}", 9)) { fputs(title, f); p += 9; }
     else if (!strncmp(p, "{{WASM}}", 8)) { fwrite(wasm, 1, nw, f); p += 8; }
@@ -213,18 +273,64 @@ static void rinc_typeMore(void) {
   }
 }
 
-/* pc.launch, as far as the desktop can (it has no apps on storage): to a built-in app. 0: switched,
+/* storage (files.c) */
+const char *rinc_storageStart(const char *name);
+const char *rinc_storageAt(const char *dir);
+void rinc_mkdirsFor(const char *file);
+
+/* an app by name: from storage, or else the bundle; compiled (or, an image, loaded) and started. 0,
    with *game saying whether it has frames; -1: not (said why) */
-static int rinc_switch(int *game) {
-  const char *src; int len, fn;
-  rinc_launch = 0;
-  if (!(src = rinc_builtinApp(rinc_launchName, &len))) { fprintf(stderr, "rinc: no app %s here (the desktop has no apps on storage)\n", rinc_launchName); return -1; }
+static int rinc_openApp(const char *name, int *game) {
+  const rinc_App *b = 0; int n, fn, bad;
+  name = rinc_appFor(name); /* (home: storage's, else the bundle's) */
+  n = rinc_readApp(name, rinc_src, sizeof rinc_src);
+  if (n == -2) { fprintf(stderr, "%s.rio: too big\n", name); return -1; }
+  if (n < 0 && !(b = rinc_bundled(name))) { fprintf(stderr, "rinc: no app named %s (rinc -install %s, if it's a standard one)\n", name, name); return -1; }
   rinc_audioReset();
-  if (rinc_start(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, rinc_put) || rinc_compile(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, src, (uint32_t)len) || rio_run(&rinc_vm) ||
-      ((fn = rio_findProc(&rinc_vm, "main")) >= 0 && rio_call(&rinc_vm, fn))) {
-    fflush(stdout); fprintf(stderr, "%s.rio:%s\n", rinc_launchName, rio_error(&rinc_vm)); return -1;
+  rinc_setAppName(name);
+  if (rinc_start(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, rinc_put)) return -1;
+  if (b && b->image) bad = rio_loadImage(&rinc_vm, b->data, b->len);
+  else bad = rinc_compile(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, b ? b->data : rinc_src, b ? (uint32_t)(b->len ? b->len : strlen(b->data)) : (uint32_t)n);
+  if (bad || rio_run(&rinc_vm) || ((fn = rio_findProc(&rinc_vm, "main")) >= 0 && rio_call(&rinc_vm, fn))) {
+    fflush(stdout); fprintf(stderr, "%s.rio:%s\n", name, rio_error(&rinc_vm)); return -1;
   }
   *game = rio_findProc(&rinc_vm, "update") >= 0 || rio_findProc(&rinc_vm, "draw") >= 0;
+  return 0;
+}
+/* pc.launch, or the system key: to rinc_launchName */
+static int rinc_switch(int *game) { rinc_launch = 0; return rinc_openApp(rinc_launchName, game); }
+
+/* -install: standard apps (home, console, the demos), by name, fetched with curl from the Rinc
+   repository's main branch; or app files (name.rio) copied. Into storage. 0, or 1 (said why) */
+static int rinc_install(const char *what, const char *root) {
+  char name[40], tmp[1100], cmd[1400]; const char *base = strrchr(what, '/'), *dot; size_t k, n; FILE *f; int got = 0, i;
+  base = base ? base + 1 : what;
+  if (strrchr(base, '\\')) base = strrchr(base, '\\') + 1;
+  dot = strstr(base, ".rio");
+  n = dot ? (size_t)(dot - base) : strlen(base);
+  for (k = 0; k < n && k < sizeof name - 1; k++) {
+    char c = base[k];
+    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-')) { fprintf(stderr, "rinc: %s: names are letters, digits, _ and -\n", what); return 1; }
+    name[k] = c;
+  }
+  name[k] = 0;
+  if (dot) { /* a file of one's own */
+    if (!(f = fopen(what, "rb"))) { fprintf(stderr, "rinc: can't open %s\n", what); return 1; }
+    got = (int)fread(rinc_src, 1, sizeof rinc_src, f); fclose(f);
+  } else { /* a standard one: system/name.rio, else apps/name.rio, from the repository, through curl */
+    static const char *const dirs[] = {"system", "apps"};
+    snprintf(tmp, sizeof tmp, "%s/download.tmp", root);
+    for (i = 0; i < 2 && got <= 0; i++) {
+      snprintf(cmd, sizeof cmd, "curl -fsL -o \"%s\" https://raw.githubusercontent.com/rincpc/rinc/main/%s/%s.rio", tmp, dirs[i], name);
+      rinc_mkdirsFor(tmp);
+      if (system(cmd) == 0 && (f = fopen(tmp, "rb"))) { got = (int)fread(rinc_src, 1, sizeof rinc_src, f); fclose(f); }
+      remove(tmp);
+    }
+    if (got <= 0) { fprintf(stderr, "rinc: couldn't get %s (installing a standard app takes curl, and the internet)\n", name); return 1; }
+  }
+  snprintf(cmd, sizeof cmd, "/rinc/apps/%s/%s.rio", name, name);
+  if (rinc_fs->open(cmd, 1) || rinc_fs->write(rinc_src, got) != got || rinc_fs->close()) { fprintf(stderr, "rinc: can't write %s\n", name); return 1; }
+  printf("installed %s, in %s/apps/%s\n", name, root, name);
   return 0;
 }
 
@@ -295,6 +401,7 @@ static int rinc_window(const char *title) {
     SDL_Event e; const bool *k; uint16_t *px; int pitch, x, y;
     while (SDL_PollEvent(&e)) {
       if (e.type == SDL_EVENT_QUIT) running = 0;
+      if (rinc_systemHeld() && (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_TEXT_INPUT)) continue; /* (a system combination: not the app's) */
       if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) rinc_textEsc(); /* (Esc is the app's: closing the window quits) */
       if (e.type == SDL_EVENT_TEXT_INPUT) { const char *t = e.text.text; while (*t) rinc_textPush((unsigned char)*t++); } /* (key(): typing) */
       if (e.type == SDL_EVENT_KEY_DOWN && (e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER)) rinc_textPush(13);
@@ -309,7 +416,8 @@ static int rinc_window(const char *title) {
     { /* the system key: Shift tapped then held (the Windows key is the desktop's own), or a controller's guide button */
       int other = 0, s;
       for (s = 0; s < SDL_SCANCODE_COUNT; s++) other |= k[s] && s != SDL_SCANCODE_LSHIFT && s != SDL_SCANCODE_RSHIFT;
-      if (rinc_systemKey(rinc_pad && SDL_GetGamepadButton(rinc_pad, SDL_GAMEPAD_BUTTON_GUIDE), k[SDL_SCANCODE_LSHIFT] || k[SDL_SCANCODE_RSHIFT], other)) {
+      if (rinc_systemKey(rinc_pad && SDL_GetGamepadButton(rinc_pad, SDL_GAMEPAD_BUTTON_GUIDE), k[SDL_SCANCODE_LSHIFT] || k[SDL_SCANCODE_RSHIFT], other,
+                         k[SDL_SCANCODE_ESCAPE] || (rinc_pad && SDL_GetGamepadButton(rinc_pad, SDL_GAMEPAD_BUTTON_BACK)))) {
         strcpy(rinc_launchName, "home"); rinc_launch = 1;
       }
     }
@@ -344,8 +452,9 @@ static int rinc_window(const char *title) {
 #endif
 
 int main(int argc, char **argv) {
-  const char *app = 0, *out = 0, *img = 0, *wavout = 0, *exp = 0, *web = 0, *runner = 0, *builtin = 0; int i, fn, frames = 0, game, memReport = 0; uint32_t size = 0;
-  char appFile[48];
+  const char *apps[rinc_BUNDLE_MOST], *out = 0, *img = 0, *wavout = 0, *exp = 0, *web = 0, *runner = 0, *named = 0, *data = 0, *root = 0, *home = 0, *storage = 0, *app = 0;
+  const char *installs[32]; int napps = 0, ninstall = 0, i, fn, frames = 0, game = 0, memReport = 0, opened = 0; uint32_t size = 0;
+  char stem[40], *self = 0;
   for (i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "-o") && i + 1 < argc) out = argv[++i];
     else if (!strcmp(argv[i], "-frames") && i + 1 < argc) frames = atoi(argv[++i]);
@@ -354,40 +463,61 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[i], "-export") && i + 1 < argc) exp = argv[++i];
     else if (!strcmp(argv[i], "-web") && i + 1 < argc) web = argv[++i];
     else if (!strcmp(argv[i], "-runner") && i + 1 < argc) runner = argv[++i];
-    else if (!strcmp(argv[i], "-app") && i + 1 < argc) builtin = argv[++i];
+    else if (!strcmp(argv[i], "-home") && i + 1 < argc) home = argv[++i];
+    else if (!strcmp(argv[i], "-name") && i + 1 < argc) storage = argv[++i];
+    else if (!strcmp(argv[i], "-app") && i + 1 < argc) named = argv[++i];
+    else if (!strcmp(argv[i], "-data") && i + 1 < argc) data = argv[++i];
+    else if (!strcmp(argv[i], "-install")) while (i + 1 < argc && argv[i + 1][0] != '-' && ninstall < 32) installs[ninstall++] = argv[++i];
     else if (!strcmp(argv[i], "-m")) memReport = 1;
     else if (!strcmp(argv[i], "-type") && i + 1 < argc) rinc_typing = argv[++i];
-    else if (argv[i][0] == '-' || app) {
-      fprintf(stderr, "usage: rinc [app.rio | -app name] [-m] [-frames n] [-o screen.ppm] [-wav sound.wav] [-type text] [-i app.img] [-export game [-runner rinc]] [-web game.html]\n");
+    else if (argv[i][0] == '-' || napps == rinc_BUNDLE_MOST) {
+      fprintf(stderr, "usage: rinc [app.rio | -app name] [-m] [-frames n] [-o screen.ppm] [-wav sound.wav] [-type text] [-i app.img]\n"
+                      "       rinc app.rio... -export program [-runner rinc] [-home name] [-name folder]\n"
+                      "       rinc app.rio... -web page.html [-home name]\n"
+                      "       rinc -install name|app.rio...      (and -data folder with any of these: storage there)\n");
       return 2;
     }
-    else app = argv[i];
+    else apps[napps++] = argv[i];
   }
   rinc_t0 = clock(); rinc_time = rinc_now;
-  if (rinc_start(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, rinc_put)) { fprintf(stderr, "rinc: can't start\n"); return 1; }
-  if (builtin) { /* a built-in app */
-    int len;
-    if (!rinc_builtinApp(builtin, &len) || app) { fprintf(stderr, "rinc: -app is home or console, without an app\n"); return 2; }
-    snprintf(appFile, sizeof appFile, "%s.rio", builtin);
-    app = appFile;
+  if (exp || web) { /* a bundle of the apps, as a program or a page */
+    if (!napps) { fprintf(stderr, "rinc: -export and -web take the apps to bundle: rinc a.rio b.rio -export game\n"); return 2; }
+    rinc_storageStart("rinc");
+    if (!(size = rinc_makeBundle(apps, napps, home, storage))) return 1;
+    if (exp && rinc_exportNative(exp, runner, size)) return 1;
+    if (web) { rinc_bundleRead(rinc_bundleBuf, size); return rinc_exportWeb(web, rinc_appFor("home"), size); }
+    return 0;
   }
-  if (!app) { /* an exported game: the app it carries */
-    size_t n; char *self = rinc_selfFile(&n);
-    if (self && (size = rinc_carried(self, n))) memcpy(rinc_image, self + n - 12 - size, size);
-    free(self);
-    if (size) app = argc > 0 ? argv[0] : "rinc";
+  if (napps > 1) { fprintf(stderr, "rinc: several apps are for a bundle: -export or -web\n"); return 2; }
+  app = napps ? apps[0] : 0;
+  if (!app && !named) { /* an exported program: the bundle it carries */
+    size_t n;
+    if ((self = rinc_selfFile(&n)) && (size = rinc_carried(self, n)) && !rinc_bundleRead(self + n - 12 - size, size)) named = "home";
+  }
+  if (data) root = rinc_storageAt(data); /* (apps, and their save spaces) */
+  else root = rinc_storageStart(named && size ? (*rinc_bundleName() ? rinc_bundleName() : "game") : "rinc");
+  if (ninstall) {
+    int bad = 0;
+    for (i = 0; i < ninstall; i++) bad |= rinc_install(installs[i], root);
+    return bad;
+  }
+  if (rinc_start(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, rinc_put)) { fprintf(stderr, "rinc: can't start\n"); return 1; }
+  if (!app && !named && (rinc_readApp("home", 0, 0) != -1 || rinc_bundled(rinc_appFor("home")))) named = "home"; /* (plain rinc: home, if it's installed) */
+  if (named) {
+    if (app || rinc_openApp(named, &game)) return 2;
+    app = named;
+    opened = 1;
   }
   if (app) {
-    if (!size) {
-      FILE *f = builtin ? 0 : fopen(app, "rb"); size_t n; int len;
-      if (builtin) { const char *src = rinc_builtinApp(builtin, &len); memcpy(rinc_src, src, (size_t)len); n = (size_t)len; }
-      else if (!f) { fprintf(stderr, "rinc: can't open %s\n", app); return 2; }
-      else { n = fread(rinc_src, 1, sizeof rinc_src, f); fclose(f); }
-      if (img || exp || web) {
-        if (!(size = rinc_makeImage(app, n, img != 0))) return 1;
-        if (img && rinc_writeFile(img, rinc_image, size, 0, 0, 0, 0)) return 1;
-        if (exp && rinc_exportNative(exp, runner, size)) return 1;
-        return web ? rinc_exportWeb(web, app, size) : 0;
+    if (!opened) {
+      FILE *f = fopen(app, "rb"); size_t n;
+      if (!f) { fprintf(stderr, "rinc: can't open %s\n", app); return 2; }
+      n = fread(rinc_src, 1, sizeof rinc_src, f); fclose(f);
+      rinc_stem(app, stem, sizeof stem);
+      rinc_setAppName(stem);
+      if (img) {
+        if (!(size = rinc_makeImage(app, n, 1))) return 1;
+        return rinc_writeFile(img, rinc_image, size, 0, 0, 0, 0);
       }
       if (rinc_compileApp(app, n)) return 1;
       if (memReport) { /* -m: how near its limits it came, compiling and running, as on every Rinc */
@@ -396,9 +526,9 @@ int main(int argc, char **argv) {
         printf("%s: fits in the 256 KB app space\n%s", app, text);
         return 0;
       }
-    } else if (rio_loadImage(&rinc_vm, rinc_image, size)) { fprintf(stderr, "%s: %s\n", app, rio_error(&rinc_vm)); return 1; }
-    if (rio_run(&rinc_vm) || ((fn = rio_findProc(&rinc_vm, "main")) >= 0 && rio_call(&rinc_vm, fn))) {
-      fflush(stdout); fprintf(stderr, "%s:%s\n", app, rio_error(&rinc_vm)); return 1;
+      if (rio_run(&rinc_vm) || ((fn = rio_findProc(&rinc_vm, "main")) >= 0 && rio_call(&rinc_vm, fn))) {
+        fflush(stdout); fprintf(stderr, "%s:%s\n", app, rio_error(&rinc_vm)); return 1;
+      }
     }
 #if rinc_SDL
     if (!out && !frames) return rinc_window(app);
@@ -413,6 +543,7 @@ int main(int argc, char **argv) {
     if (wavout && rinc_saveWav(wavout, (uint32_t)(frames < 3600 ? frames : 3600) * (rinc_RATE / 60))) { fprintf(stderr, "rinc: can't write %s\n", wavout); return 1; }
   } else {
     int c;
+    fprintf(stderr, "(no home app here yet: rinc -install home console, with curl; or rinc app.rio)\n");
     if (rinc_replBegin(&rinc_repl, &rinc_vm, rinc_replScratch, sizeof rinc_replScratch)) { fprintf(stderr, "rinc: %s\n", rio_error(&rinc_vm)); return 1; }
     rinc_repl.echo = 0;
     while ((c = getchar()) != EOF) rinc_replChar(&rinc_repl, c);

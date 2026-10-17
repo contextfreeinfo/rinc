@@ -1,7 +1,9 @@
-# Home: the apps on the card, and the console. Type to narrow the list, up and down to choose,
-# Enter to start one (or the d-pad and A). Esc clears what's typed. Built into the firmware: the
-# board starts here, and the Windows key (or a controller's Xbox button) comes back. An app's title and
-# description come from its first line, as "# Title: what it does".
+# Home: the apps, to start one
+#
+# Type to narrow the list, up and down to choose, Enter to start one (or the d-pad and A). Esc clears
+# what's typed. Built into the Fruit Jam's firmware: it starts here, and Windows+Esc (or a controller's
+# Xbox+Back) comes back. An app's title and description come from its first line, as
+# "# Title: what it does".
 
 names: Blob[2048] # every app's folder name, one after another
 infos: Blob[6144] # and its first line
@@ -68,21 +70,19 @@ title :: proc(i: Int) -> Blob
   return names[nameAt[i]:nameAt[i] + nameLen[i]]
 end
 
-consoleName: Blob[7]
-for ch, i in "console"
-  consoleName[i] = ch
+isConsole :: proc(i: Int) -> Bool
+  return names[nameAt[i]:nameAt[i] + nameLen[i]].asString() == "console"
 end
 
+# the apps whose name or title has what's typed in it: the console first, where there is one
 narrow :: proc()
   nshown = 0
-  if has(consoleName)
-    shown[nshown] = -1
-    nshown += 1
-  end
-  for i in 0..<count
-    if has(names[nameAt[i]:nameAt[i] + nameLen[i]]) or has(title(i))
-      shown[nshown] = i
-      nshown += 1
+  for pass in 0..<2
+    for i in 0..<count
+      if isConsole(i) == (pass == 0) and (has(names[nameAt[i]:nameAt[i] + nameLen[i]]) or has(title(i)))
+        shown[nshown] = i
+        nshown += 1
+      end
     end
   end
   pick = max(0, min(pick, nshown - 1))
@@ -94,9 +94,7 @@ start :: proc()
     return
   end
   k := shown[pick]
-  if k < 0
-    pc.launch("console")
-  else
+  if k >= 0
     pc.launch(names[nameAt[k]:nameAt[k] + nameLen[k]].asString())
   end
 end
@@ -184,27 +182,22 @@ draw* :: proc()
     if selected
       dim = 6
     end
-    if k < 0
-      pc.print("Console", 16, y, 7)
-      pc.print("rio, typed and run", 96, y, dim)
-    else
-      t := title(k)
-      pc.print(t.asString(), 16, y, 7)
-      if titleLen[k] > 0
-        at := titleLen[k] + 1
-        for at < infoLen[k] and infos[infoAt[k] + at] == 32 # (the spaces after the colon)
-          at += 1
-        end
-        d := infos[infoAt[k] + at:infoAt[k] + min(infoLen[k], at + 35)]
-        pc.print(d.asString(), 96, y, dim)
+    t := title(k)
+    pc.print(t.asString(), 16, y, 7)
+    if titleLen[k] > 0
+      at := titleLen[k] + 1
+      for at < infoLen[k] and infos[infoAt[k] + at] == 32 # (the spaces after the colon)
+        at += 1
       end
+      d := infos[infoAt[k] + at:infoAt[k] + min(infoLen[k], at + 35)]
+      pc.print(d.asString(), 96, y, dim)
     end
   end
   if nshown == 0
     pc.print("Nothing matches", 16, 54, 13)
   end
   if count == 0
-    pc.print("No apps on the card yet: /rinc/apps", 12, 216, 13)
+    pc.print("No apps yet", 12, 216, 13)
   end
-  pc.print("Enter opens   Esc clears", 12, 228, 5)
+  pc.print("Enter opens  Esc clears  Sys+Esc: back home", 12, 228, 5)
 end

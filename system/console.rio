@@ -1,6 +1,8 @@
-# Console: Rio, typed and run, and the apps on the card. A line on its own can be a command: run (what's
-# been typed, as a game: Esc stops it), ls, load name, run name, save name, delete name, home. Built into
-# the firmware, an ordinary app: the Rio it runs is a session (pc.rioStart) in memory of its own.
+# Console: Rio, typed and run
+#
+# And the apps in storage. A line on its own can be a command: run (what's been typed, as a game: Esc
+# stops it), ls, load name, run name, save name, delete name, home. An ordinary app (the Fruit Jam's
+# firmware has it built in): the Rio it runs is a session (pc.rioStart) in memory of its own.
 
 COLS :: 53        # 6x9 characters, on the 320x240 screen
 ROWS :: 26

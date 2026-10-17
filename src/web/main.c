@@ -18,20 +18,32 @@ static int16_t rinc_sound[2048 * 2];
 static void rinc_put(const char *s, int n) { js_put(s, n); }
 
 rinc_EXPORT(source) char *rinc_webSource(void) { return rinc_src; }
-/* start the app in source(): 0, or -1 (error() says why) */
-rinc_EXPORT(start) int rinc_webStart(int len) {
-  int fn;
-  rinc_time = js_now;
-  if (rinc_start(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, rinc_put)) return -1;
+/* a bundled app, by name, started: an image (or, with the compiler, a source too). 0, or -1 */
+static int rinc_webOpen(const char *name) {
+  const rinc_App *b = rinc_bundled(rinc_appFor(name)); int fn;
+  if (!b || rinc_start(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, rinc_put)) return -1;
+  rinc_setAppName(b->name);
 #ifdef rio_NO_COMPILER
-  if (rio_loadImage(&rinc_vm, rinc_src, (uint32_t)len) || rio_run(&rinc_vm)) return -1;
+  if (!b->image || rio_loadImage(&rinc_vm, b->data, b->len) || rio_run(&rinc_vm)) return -1;
 #else
-  if (rio_compile(&rinc_vm, rinc_src, (uint32_t)len) || rio_run(&rinc_vm)) return -1;
+  if ((b->image ? rio_loadImage(&rinc_vm, b->data, b->len) : rinc_compile(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, b->data, b->len)) || rio_run(&rinc_vm)) return -1;
 #endif
   return (fn = rio_findProc(&rinc_vm, "main")) >= 0 ? rio_call(&rinc_vm, fn) : 0;
 }
-/* a frame with these buttons held: 0, 1 (not a game), -1 (error) */
-rinc_EXPORT(frame) int rinc_webFrame(int buttons) { rinc_buttons = (uint16_t)buttons; return rinc_frame(&rinc_vm); }
+/* start the bundle in source() (docs/spec/apps.md#bundles), at its home app: 0, or -1 (error() says why) */
+rinc_EXPORT(start) int rinc_webStart(int len) {
+  rinc_time = js_now;
+  if (rinc_bundleRead(rinc_src, (uint32_t)len)) return -1;
+  return rinc_webOpen("home");
+}
+/* a frame with these buttons held: 0, 1 (not a game), -1 (error); then any pc.launch */
+rinc_EXPORT(frame) int rinc_webFrame(int buttons) {
+  int res;
+  rinc_buttons = (uint16_t)buttons;
+  res = rinc_frame(&rinc_vm);
+  if (rinc_launch) { rinc_launch = 0; return rinc_webOpen(rinc_launchName) < 0 ? -1 : 0; }
+  return res;
+}
 rinc_EXPORT(error) const char *rinc_webError(void) { return rio_error(&rinc_vm); }
 rinc_EXPORT(typed) void rinc_webTyped(int c) { rinc_textPush(c); } /* a character typed, for key() */
 /* a controller's sticks and triggers, before a frame (as in rinc_axes) */

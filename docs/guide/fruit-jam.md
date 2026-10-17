@@ -15,16 +15,24 @@ cmake --build build --target flash   # picotool reboots the running board into B
 The first time (or if the board isn't answering on USB), hold BOOT while resetting it and copy
 `build/rinc.uf2` to the drive that appears.
 
+The firmware's bundle is a build setting: `RINC_BUNDLE`, its apps' `.rio` files separated by `|` (home
+and the console by default), and `RINC_HOME`, the one home means (by default the only app, or one named
+home). A firmware of your own apps is just a different list:
+
+```sh
+cmake -S . -B build -G Ninja "-DRINC_BUNDLE=$PWD/apps/breakout.rio|$PWD/system/console.rio" -DRINC_HOME=breakout
+```
+
 ## Using it
 
 Rinc starts at home on the HDMI screen (640x480, each pixel 2x2): the apps on the SD card, sorted, and
 the console. Type to narrow the list, up and down (or the d-pad) to choose, Enter (or A) to start. The
-system key comes back home from anywhere: the Windows key, a controller's Xbox button, or Shift tapped
-and then held. Esc and Ctrl+C belong to apps. A keyboard's volume knob or keys set the volume (both
+system key with Esc comes back home from anywhere: Windows+Esc, a controller's Xbox+Back, or Shift tapped
+and then held, with Esc. Esc and Ctrl+C alone belong to apps. A keyboard's volume knob or keys set the volume (both
 outputs, in 2.5 dB steps, and mute).
 
 An app that isn't a game, or one that stops with an error, leaves its log and the error on the screen,
-until the system key goes home. One that runs out of memory shows how near each limit it came too.
+until system+Esc goes home. One that runs out of memory shows how near each limit it came too.
 
 Keyboards plug into the USB host ports. Controllers there can be wired Xbox 360 and Xbox One/Series
 ones, recognized by the USB interfaces they offer (`src/rp2350/gamepad.c`).
@@ -41,7 +49,9 @@ as `send.py`. A serial terminal sees each line once it's entered, not as it's ty
 
 ## Apps on the SD card
 
-A FAT32 card holds apps as `/rinc/apps/name/name.rio`, managed from the console with `ls`, `run`,
+The firmware carries home and the console; an app of the same name on the card takes its place, so a
+home or console of your own goes there. A FAT32 card holds apps as `/rinc/apps/name/name.rio` (and each
+app's own files in `/rinc/save/name`), managed from the console with `ls`, `run`,
 `load`, `save`, `delete` and `home` (see [the console](../spec/apps.md#the-console)). From a PC,
 `uv run tools/send.py apps/*.rio --save` puts apps on the card over USB serial, and
 `uv run tools/send.py apps/bounce.rio` sends one and starts it, in a couple of seconds. A card reader

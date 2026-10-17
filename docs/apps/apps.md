@@ -18,5 +18,5 @@ So is the console (`system/console.rio`): it runs the Rio you type in a session 
 `pc.rioStart`, `pc.rioEval` and the rest (see [Rio inside an app](../spec/rio.md)), and reads and writes
 apps with `pc.appSource`, `pc.appSave` and `pc.appDelete`. An app could be an editor the same way.
 
-The system key always goes home: the Windows key, a controller's Xbox button, or Shift tapped and then
-held.
+The system key with Esc always goes home: Windows+Esc, a controller's Xbox+Back, or Shift tapped and
+then held, with Esc.
