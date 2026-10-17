@@ -7,7 +7,8 @@
    lines in a row (doubling vertically). That's 320 lookups per screen line, about 6% of core 1.
 
    Apps draw into rinc_screen. At each vertical blank a DMA copies it to the buffer being shown, so
-   the picture is always a whole frame (rinc_frames counts them, for a flip() to wait on).
+   the picture is always a whole frame (rinc_frames counts them, for a flip() to wait on). The system
+   overlay (rinc_overlay) takes the place of the bottom rows while it's up, leaving the app's alone.
 
    Sound goes in data islands, one in each line's sync pulse: audio packets of 4 samples (32 samples
    every 21 lines: exactly 48 kHz), and now and then the audio clock (N 6144, CTS 25200: 48 kHz from
@@ -101,7 +102,8 @@ static bool rinc_pixelsNext; /* posted an active line's commands; its pixels com
 volatile uint32_t rinc_frames;
 
 static void __scratch_x("") rinc_convert(int y) {
-  const uint8_t *s = shown[y]; uint32_t *d = rinc_line[y & 1]; int x;
+  const uint8_t *s = rinc_overlayOn && y >= rinc_H - rinc_OVERLAY_H ? rinc_overlay[y - (rinc_H - rinc_OVERLAY_H)] : shown[y]; /* (the system overlay, over the bottom) */
+  uint32_t *d = rinc_line[y & 1]; int x;
   for (x = 0; x < rinc_W; x += 4) {
     d[x] = rinc_palette[s[x]]; d[x + 1] = rinc_palette[s[x + 1]]; d[x + 2] = rinc_palette[s[x + 2]]; d[x + 3] = rinc_palette[s[x + 3]];
   }

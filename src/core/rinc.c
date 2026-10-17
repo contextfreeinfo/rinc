@@ -49,35 +49,47 @@ static void rinc_hostPrint(rio_Vm *v, rio_Val *a) { /* print(s, x, y, c): text a
 }
 /* key() -> Int: the next key typed, or -1 when there's none waiting (docs/spec/input.md#typed-text):
    printable ASCII, 13 Enter, 8 Backspace, 9 Tab, 27 Esc, Ctrl+letter as 1-26, and editing keys as
-   rinc_Key_*. The keys also press buttons as they're held: an app reads whichever it wants. A nested
-   session (pc.rioStart) has a queue of its own, which its app fills with pc.rioType */
-typedef struct { uint8_t q[64]; int head, tail, esc, escn; } rinc_Text;
+   rinc_Key_*; the keys that aren't characters with the modifiers held (rinc_Mod_*). The keys also press
+   buttons as they're held: an app reads whichever it wants. A nested session (pc.rioStart) has a queue
+   of its own, which its app fills with pc.rioType */
+#define rinc_TEXT_CAP 64
+typedef struct { uint16_t q[rinc_TEXT_CAP]; int head, tail, esc, escn, escp[3]; } rinc_Text;
 static rinc_Text rinc_typed, rinc_nestTyped;
 static void rinc_queue(rinc_Text *t, int c) {
-  int next = (t->head + 1) % (int)sizeof t->q;
-  if (next != t->tail) { t->q[t->head] = (uint8_t)c; t->head = next; }
+  int next = (t->head + 1) % rinc_TEXT_CAP;
+  if (next != t->tail) { t->q[t->head] = (uint16_t)c; t->head = next; }
 }
 static int rinc_dequeue(rinc_Text *t) {
   int c;
   if (t->tail == t->head) return -1;
-  c = t->q[t->tail]; t->tail = (t->tail + 1) % (int)sizeof t->q;
+  c = t->q[t->tail]; t->tail = (t->tail + 1) % rinc_TEXT_CAP;
   return c;
 }
-/* a terminal's bytes: ESC [ (or ESC O) and a letter, or digits and ~, is an editing key */
+int rinc_textMods(int shift, int ctrl, int alt) { return (shift ? rinc_Mod_shift : 0) | (ctrl ? rinc_Mod_ctrl : 0) | (alt ? rinc_Mod_alt : 0); }
+/* a terminal's bytes: ESC [ (or ESC O) and a letter, or numbers and ~, is an editing key. Numbers are
+   separated by ; and a key's modifiers are its second (1 + 1 Shift, 2 Alt, 4 Ctrl), as xterm sends
+   them: ESC [ 1 ; 5 C is Ctrl+right, ESC [ 3 ; 2 ~ Shift+Delete, and ESC [ 27 ; m ; k ~ key k (Tab,
+   Enter, Backspace, a letter for Ctrl+letter) with modifiers m. ESC [ Z is Shift+Tab */
 void rinc_textPush(int c) {
   rinc_Text *t = &rinc_typed;
   if (t->esc == 1) {
-    if (c == '[' || c == 'O') { t->esc = 2; t->escn = 0; return; }
+    if (c == '[' || c == 'O') { t->esc = 2; t->escn = 0; t->escp[0] = t->escp[1] = t->escp[2] = 0; return; }
     t->esc = 0; rinc_queue(t, 27); /* (a lone ESC: Esc itself, then c) */
   } else if (t->esc == 2) {
-    int n = t->escn;
-    if (c >= '0' && c <= '9') { t->escn = n * 10 + c - '0'; return; }
-    if (c == ';') { t->escn = 0; return; } /* (modifiers, as in ESC [ 1 ; 5 C: the key's the same) */
+    int n = t->escp[0], m = t->escp[1] > 1 ? t->escp[1] - 1 : 0, mods = rinc_textMods(m & 1, m & 4, m & 2), k = t->escp[2];
+    if (c >= '0' && c <= '9') { if (t->escp[t->escn] < 10000) t->escp[t->escn] = t->escp[t->escn] * 10 + c - '0'; return; }
+    if (c == ';') { if (t->escn < 2) t->escn++; return; }
     t->esc = 0;
-    c = c == 'A' ? rinc_Key_up : c == 'B' ? rinc_Key_down : c == 'C' ? rinc_Key_right : c == 'D' ? rinc_Key_left :
-        c == 'H' ? rinc_Key_home : c == 'F' ? rinc_Key_end : c != '~' ? 0 : n == 1 || n == 7 ? rinc_Key_home :
-        n == 4 || n == 8 ? rinc_Key_end : n == 3 ? rinc_Key_delete : n == 5 ? rinc_Key_pageUp : n == 6 ? rinc_Key_pageDown : 0;
-    if (c) rinc_queue(t, c);
+    if (c == '~' && n == 27) { /* (xterm's modifyOtherKeys) */
+      if (k >= 'A' && k <= 'Z') k += 32;
+      c = k == 9 || k == 13 ? k : k == 8 || k == 127 ? 8 : k >= 'a' && k <= 'z' && (mods & rinc_Mod_ctrl) ? k - 'a' + 1 : 0;
+      if (c >= 1 && c <= 26 && c != 8 && c != 9 && c != 13) mods &= ~rinc_Mod_ctrl; /* (Ctrl+letter says Ctrl itself) */
+    } else
+      c = c == 'A' ? rinc_Key_up : c == 'B' ? rinc_Key_down : c == 'C' ? rinc_Key_right : c == 'D' ? rinc_Key_left :
+          c == 'H' ? rinc_Key_home : c == 'F' ? rinc_Key_end : c == 'Z' ? 9 | rinc_Mod_shift : c != '~' ? 0 :
+          n == 1 || n == 7 ? rinc_Key_home : n == 4 || n == 8 ? rinc_Key_end : n == 3 ? rinc_Key_delete :
+          n == 5 ? rinc_Key_pageUp : n == 6 ? rinc_Key_pageDown : 0;
+    if (c) rinc_queue(t, c | mods);
     return;
   }
   if (c == 27) { t->esc = 1; return; }
@@ -85,8 +97,8 @@ void rinc_textPush(int c) {
   if (c == 127) c = 8;
   if ((c >= 1 && c <= 26) || (c >= 32 && c < 127)) rinc_queue(t, c);
 }
-void rinc_textKey(int key) { rinc_typed.esc = 0; if (key > 0 && key < 256) rinc_queue(&rinc_typed, key); }
-int rinc_textRoom(void) { return (int)sizeof rinc_typed.q - 1 - (rinc_typed.head - rinc_typed.tail + (int)sizeof rinc_typed.q) % (int)sizeof rinc_typed.q; }
+void rinc_textKey(int key) { rinc_typed.esc = 0; if (key > 0 && key < 2048) rinc_queue(&rinc_typed, key); }
+int rinc_textRoom(void) { return rinc_TEXT_CAP - 1 - (rinc_typed.head - rinc_typed.tail + rinc_TEXT_CAP) % rinc_TEXT_CAP; }
 /* apps, for home: apps() -> Int looks again, in storage and in the bundle, and says how many (home
    aside); appName(i, out) -> Int and appInfo(i, out) -> Int copy app i's name, or its description (its
    source's first line, the comment marker left off: "Title: what it does"), into out, and say how long
@@ -374,7 +386,7 @@ static void rinc_hostRioEval(rio_Vm *v, rio_Val *a) {
   a[0].i = v != &rinc_nest && rinc_nestOn && s ? rio_replEval(&rinc_nest, s, a[1].u) : -1;
 }
 static void rinc_hostRioFrame(rio_Vm *v, rio_Val *a) { a[0].i = v != &rinc_nest && rinc_nestOn ? rinc_frame(&rinc_nest) : -1; }
-static void rinc_hostRioType(rio_Vm *v, rio_Val *a) { if (v != &rinc_nest && a[0].i > 0 && a[0].i < 256) rinc_queue(&rinc_nestTyped, a[0].i); }
+static void rinc_hostRioType(rio_Vm *v, rio_Val *a) { if (v != &rinc_nest && a[0].i > 0 && a[0].i < 2048) rinc_queue(&rinc_nestTyped, a[0].i); }
 static void rinc_hostRioError(rio_Vm *v, rio_Val *a) {
   const char *e = rinc_nestOn || rinc_nestTried ? rio_error(&rinc_nest) : "no session (pc.rioStart starts one)";
   a[0].i = v == &rinc_nest ? 0 : rinc_copyText(v, a, e, (int)strlen(e));
@@ -440,19 +452,45 @@ int rinc_atLimit(const char *e) { return strstr(e, "out of") || strstr(e, "too m
 
 static int rinc_systemDown;
 int rinc_systemHeld(void) { return rinc_systemDown; }
+uint8_t rinc_overlay[rinc_OVERLAY_H][rinc_W];
+volatile int rinc_overlayOn;
+/* text into the overlay, at pixel x on its row */
+static int rinc_overlayText(const char *s, int x, int fg) {
+  for (; *s; s++, x += 6) {
+    const uint8_t *g = *s > 32 && *s < 127 ? rinc_font[*s - 32] : rinc_font[0];
+    int r, k;
+    for (r = 0; r < 8; r++)
+      for (k = 0; k < 6 && x + k < rinc_W; k++) if (g[r] >> k & 1) rinc_overlay[2 + r][x + k] = (uint8_t)fg;
+  }
+  return x;
+}
+static void rinc_overlayDraw(void) {
+  int x;
+  memset(rinc_overlay, 0, sizeof rinc_overlay);
+  memset(rinc_overlay[0], 10, rinc_W); /* (a yellow edge) */
+  x = rinc_overlayText("SYSTEM", 4, 10);
+  rinc_overlayText("Esc: home", x + 12, 7);
+}
 int rinc_systemKey(int sysDown, int shiftDown, int otherDown, int escDown) {
   /* Shift as the system key: tapped (pressed and let go with nothing else), then pressed again within
-     0.4 s and held. shift: 0 nothing yet, 1 the tap's press, 2 tapped, 3 held as the system key */
+     0.4 s: the system key while it's held, and for 0.7 s after it's let go (so Esc can come after, as
+     browsers keep Shift+Esc). shift: 0 nothing yet, 1 the tap's press, 2 tapped, 3 held as the system
+     key, 4 let go, still the system key for the next key */
   static int shift, frames, wasShift, wasEsc;
-  int esc = escDown && !wasEsc;
+  int esc = escDown && !wasEsc, home;
   if (frames < 1000) frames++;
   if (shiftDown && !wasShift) { shift = shift == 2 && frames <= 24 ? 3 : 1; frames = 0; }
-  else if (!shiftDown && wasShift) { shift = shift == 1 && frames <= 24 ? 2 : 0; frames = 0; }
+  else if (!shiftDown && wasShift) { shift = shift == 1 && frames <= 24 ? 2 : shift == 3 ? 4 : 0; frames = 0; }
   else if (shift == 1 && otherDown) shift = 0; /* (Shift held for typing capitals) */
+  else if (shift == 4 && ((otherDown && !escDown) || frames > 42)) shift = 0; /* (another key, or too late) */
   wasShift = shiftDown;
   wasEsc = escDown;
-  rinc_systemDown = sysDown || shift == 3;
-  return rinc_systemDown && esc; /* (system + Esc: home. Alone, it's nothing, so it isn't pressed by accident) */
+  rinc_systemDown = sysDown || shift >= 3;
+  home = rinc_systemDown && esc; /* (system + Esc: home. Alone, it's nothing, so it isn't pressed by accident) */
+  if (home && shift == 4) shift = 0;
+  if (rinc_systemDown && !rinc_overlayOn) rinc_overlayDraw();
+  rinc_overlayOn = rinc_systemDown && !home;
+  return home;
 }
 
 int rinc_hostProcs(rio_Vm *vm) {

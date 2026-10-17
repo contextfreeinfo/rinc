@@ -27,12 +27,34 @@ static void rinc_push(int c) {
   unsigned next = (rinc_qhead + 1) % sizeof rinc_queue;
   if (next != rinc_qtail) { rinc_queue[rinc_qhead] = (char)c; rinc_qhead = next; }
 }
-/* editing keys, as a terminal sends them: ESC [ and a letter (arrows, Home, End) or 3~ (Delete) */
-static int rinc_editing(uint8_t key) {
-  const char *seq = key == HID_KEY_ARROW_UP ? "A" : key == HID_KEY_ARROW_DOWN ? "B" : key == HID_KEY_ARROW_RIGHT ? "C" :
-    key == HID_KEY_ARROW_LEFT ? "D" : key == HID_KEY_HOME ? "H" : key == HID_KEY_END ? "F" : key == HID_KEY_DELETE ? "3~" : 0;
-  if (!seq) return 0;
-  rinc_push(27); rinc_push('['); while (*seq) rinc_push(*seq++);
+/* editing keys, as xterm sends them, with the modifiers held (m: 1 + 1 Shift, 2 Alt, 4 Ctrl): ESC [ and a
+   letter (arrows, Home, End: ESC [ 1 ; m C with modifiers), or n ~ (Delete, Page Up and Down: n ; m ~).
+   And the keys a terminal sends no differently with modifiers: Shift+Tab as ESC [ Z, and Tab, Enter,
+   Backspace and Ctrl+letter with other modifiers as ESC [ 27 ; m ; key ~ */
+static int rinc_editing(uint8_t key, uint8_t mods) {
+  int shift = (mods & (KEYBOARD_MODIFIER_LEFTSHIFT | KEYBOARD_MODIFIER_RIGHTSHIFT)) != 0;
+  int ctrl = (mods & (KEYBOARD_MODIFIER_LEFTCTRL | KEYBOARD_MODIFIER_RIGHTCTRL)) != 0;
+  int alt = (mods & (KEYBOARD_MODIFIER_LEFTALT | KEYBOARD_MODIFIER_RIGHTALT)) != 0;
+  int m = 1 + shift + 2 * alt + 4 * ctrl, n = 0, k = 0;
+  char letter = key == HID_KEY_ARROW_UP ? 'A' : key == HID_KEY_ARROW_DOWN ? 'B' : key == HID_KEY_ARROW_RIGHT ? 'C' :
+    key == HID_KEY_ARROW_LEFT ? 'D' : key == HID_KEY_HOME ? 'H' : key == HID_KEY_END ? 'F' : 0;
+  char seq[24];
+  if (key == HID_KEY_DELETE) n = 3;
+  else if (key == HID_KEY_PAGE_UP) n = 5;
+  else if (key == HID_KEY_PAGE_DOWN) n = 6;
+  else if (key == HID_KEY_TAB && shift && !ctrl && !alt) letter = 'Z';
+  else if (key == HID_KEY_TAB && (ctrl || alt)) k = 9;
+  else if ((key == HID_KEY_ENTER || key == HID_KEY_KEYPAD_ENTER) && (ctrl || alt)) k = 13;
+  else if (key == HID_KEY_BACKSPACE && (ctrl || alt)) k = 8;
+  else if (key >= HID_KEY_A && key <= HID_KEY_Z && ctrl && (shift || alt)) k = 'a' + key - HID_KEY_A;
+  if (letter == 'Z') snprintf(seq, sizeof seq, "[Z");
+  else if (letter && m > 1) snprintf(seq, sizeof seq, "[1;%d%c", m, letter);
+  else if (letter) snprintf(seq, sizeof seq, "[%c", letter);
+  else if (n) snprintf(seq, sizeof seq, m > 1 ? "[%d;%d~" : "[%d~", n, m);
+  else if (k) snprintf(seq, sizeof seq, "[27;%d;%d~", m, k);
+  else return 0;
+  rinc_push(27);
+  for (k = 0; seq[k]; k++) rinc_push(seq[k]);
   return 1;
 }
 /* a key press as a character: ASCII, Enter as \r, Backspace as 8, Ctrl+letter as its control code */
@@ -60,7 +82,7 @@ static void rinc_report(const hid_keyboard_report_t *r) {
     rinc_keysDown[k >> 3] |= (uint8_t)(1u << (k & 7));
     for (j = 0; j < 6; j++) if (rinc_last.keycode[j] == k) was = 1;
     if (!was) { /* newly pressed: type it, and repeat it if held */
-      int c = rinc_editing(k) ? -1 : rinc_character(k, r->modifier);
+      int c = rinc_editing(k, r->modifier) ? -1 : rinc_character(k, r->modifier);
       if (c >= 0) rinc_push(c);
       rinc_repeatKey = k; rinc_repeatMods = r->modifier; rinc_repeatAt = time_us_64() + rinc_REPEAT_DELAY_US;
     }
@@ -159,7 +181,7 @@ int rinc_keyboardChar(void) {
   int c;
   rinc_keyboardPoll();
   if (rinc_repeatKey && time_us_64() >= rinc_repeatAt) {
-    int r = rinc_editing(rinc_repeatKey) ? -1 : rinc_character(rinc_repeatKey, rinc_repeatMods);
+    int r = rinc_editing(rinc_repeatKey, rinc_repeatMods) ? -1 : rinc_character(rinc_repeatKey, rinc_repeatMods);
     if (r >= 0) rinc_push(r);
     rinc_repeatAt = time_us_64() + rinc_REPEAT_EVERY_US;
   }

@@ -35,8 +35,8 @@ static void rinc_put(const char *s, int n) { fwrite(s, 1, (size_t)n, stdout); ff
 static void rinc_say(const char *s) { rinc_put(s, (int)strlen(s)); }
 #define rinc_DOWN(k) (rinc_keysDown[(k) >> 3] >> ((k) & 7) & 1)
 
-/* the system key (rinc_systemKey): the Windows key, a controller's Xbox button, or Shift tapped then
-   held. With Esc (or the controller's Back), 1: home */
+/* the system key (rinc_systemKey): the Windows key, a controller's Xbox button, or Shift tapped
+   twice. With Esc (or the controller's Back), 1: home */
 static int rinc_homeKey(void) {
   int k, other = rinc_padButtons != 0;
   for (k = 0; k < 32; k++) other |= k == (0xE0 >> 3) ? rinc_keysDown[k] & ~0xAA : rinc_keysDown[k]; /* (all but Shift and GUI: E1 E3 E5 E7) */

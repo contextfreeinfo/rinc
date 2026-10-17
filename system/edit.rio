@@ -1,0 +1,1365 @@
+# Edit: a text editor, for apps' Rio
+#
+# Ctrl+O opens an app (from a list, or a new name), Ctrl+S saves it, Ctrl+R saves and runs it, Ctrl+N
+# starts a new one. It starts with the app it had last. The keys are most editors': arrows, Home, End,
+# Page Up and Down move, with Ctrl by words and to either end, and with Shift they select. Ctrl+A
+# selects all; Ctrl+X, C and V cut, copy and paste (the line, with nothing selected); Ctrl+Z undoes,
+# Ctrl+Y (or Ctrl+Shift+Z) redoes. Tab and Shift+Tab indent and outdent, Alt+Up and Down move lines,
+# Ctrl+Shift+K deletes them, Ctrl+L selects one, Ctrl+F finds, Ctrl+G goes to a line. Up to 32 KB of
+# text. An ordinary app (the Fruit Jam's firmware has it built in).
+
+CAP :: 32768          # the most text
+MAX_LINES :: 4096
+UNDOS :: 256          # edits remembered
+UNDO_BYTES :: 16384   # the text they changed
+CLIP :: 16384
+BUILT :: 8192         # lines being remade (indenting, moving)
+ROWS :: 24            # text rows, 9 pixels each
+COLS :: 48            # characters in a row, after the line numbers
+TOP_Y :: 12
+TEXT_X :: 30
+LIST_ROWS :: 16       # apps shown when opening
+
+SHIFT :: 256          # pc.key()'s modifier bits
+CTRL :: 512
+ALT :: 1024
+LEFT :: 128
+RIGHT :: 129
+UP :: 130
+DOWN :: 131
+HOME :: 132
+KEY_END :: 133
+DELETE :: 134
+PAGE_UP :: 135
+PAGE_DOWN :: 136
+
+BACK :: 1             # colors
+DARK :: 0
+DIM :: 5
+GRAY :: 6
+WHITE :: 7
+RED :: 8
+ORANGE :: 9
+YELLOW :: 10
+GREEN :: 11
+BLUE :: 12
+LAVENDER :: 13
+PINK :: 14
+PEACH :: 15
+SELECTED :: 2
+
+# ---------------------------------------------------------------- the text
+
+text: Blob[32768]
+textLen := 0
+scratch: Blob[..32768] # the text after an edit, moving over
+lineAt: [4096]Int      # where each line starts
+lineCount := 1
+cursor := 0
+anchor := 0            # the selection's other end (anchor == cursor: nothing selected)
+wantCol := -1          # the column up and down keep to
+top := 0               # the first line on the screen, and column
+left := 0
+name: Blob[..32]       # the app's name ("": new)
+one: Blob[1]
+built: Blob[..8192]
+
+lineEnd :: proc(l: Int) -> Int
+  if l + 1 < lineCount
+    return lineAt[l + 1] - 1
+  end
+  return textLen
+end
+
+lineOf :: proc(p: Int) -> Int
+  lo := 0
+  hi := lineCount - 1
+  for lo < hi
+    mid := (lo + hi + 1) / 2
+    if lineAt[mid] <= p
+      lo = mid
+    else
+      hi = mid - 1
+    end
+  end
+  return lo
+end
+
+rebuildLines :: proc()
+  lineCount = 1
+  lineAt[0] = 0
+  for i in 0..<textLen
+    if text[i] == 10 and lineCount < MAX_LINES
+      lineAt[lineCount] = i + 1
+      lineCount += 1
+    end
+  end
+end
+
+newlines :: proc(s: String) -> Int
+  n := 0
+  for c in s
+    if c == 10
+      n += 1
+    end
+  end
+  return n
+end
+
+# text[a:b] becomes s (which isn't part of text): false if there's no room
+replaceRaw :: proc(a, b: Int, s: String) -> Bool
+  if textLen - (b - a) + s.len() > CAP
+    return false
+  end
+  scratch.clear()
+  scratch.pushAll(text[b:textLen])
+  w: Blob[..] = text[a:]
+  w.pushAll(s)
+  w.pushAll(scratch[0:scratch.len()])
+  textLen += s.len() - (b - a)
+  rebuildLines()
+  return true
+end
+
+selStart :: proc() -> Int
+  return min(cursor, anchor)
+end
+selEnd :: proc() -> Int
+  return max(cursor, anchor)
+end
+
+# ---------------------------------------------------------------- messages
+
+message: Blob[..53]
+messageColor := GRAY
+messageAt := 0.0
+
+say :: proc(s: String, color: Int)
+  message.clear()
+  for c in s
+    if message.len() < 53
+      message.push(c)
+    end
+  end
+  messageColor = color
+  messageAt = pc.time()
+end
+
+# s, then name, then t
+sayName :: proc(s: String, t: String, color: Int)
+  say(s, color)
+  for c in name
+    if message.len() < 53
+      message.push(c)
+    end
+  end
+  for c in t
+    if message.len() < 53
+      message.push(c)
+    end
+  end
+end
+
+# ---------------------------------------------------------------- undo
+
+# each edit: text[pos:pos + del] became ins bytes; its deleted bytes then its inserted ones are in
+# undoText from at; the cursor and anchor before, and the cursor after
+recPos: [256]Int
+recDel: [256]Int
+recIns: [256]Int
+recAt: [256]Int
+recBefore: [256]Int
+recAnchor: [256]Int
+recAfter: [256]Int
+recCount := 0          # edits remembered
+recTop := 0            # of those, done (the rest can be redone)
+undoText: Blob[16384]
+undoLen := 0
+savedTop := 0          # recTop when it was saved (-1: that's been forgotten)
+merging := 0           # what the last edit was, to group with: 1 typing, 2 Backspace, 3 Delete
+
+undoPush :: proc(s: String)
+  w: Blob[..] = undoText[undoLen:]
+  w.pushAll(s)
+  undoLen += s.len()
+end
+
+forgetOldest :: proc()
+  n := recDel[0] + recIns[0]
+  scratch.clear()
+  scratch.pushAll(undoText[n:undoLen])
+  w: Blob[..] = undoText[0:]
+  w.pushAll(scratch[0:scratch.len()])
+  undoLen -= n
+  for i in 0..<recCount - 1
+    recPos[i] = recPos[i + 1]
+    recDel[i] = recDel[i + 1]
+    recIns[i] = recIns[i + 1]
+    recAt[i] = recAt[i + 1] - n
+    recBefore[i] = recBefore[i + 1]
+    recAnchor[i] = recAnchor[i + 1]
+    recAfter[i] = recAfter[i + 1]
+  end
+  recCount -= 1
+  recTop -= 1
+  if savedTop >= 0
+    savedTop -= 1
+  end
+end
+
+forgetAll :: proc()
+  recCount = 0
+  recTop = 0
+  undoLen = 0
+  merging = 0
+end
+
+modified :: proc() -> Bool
+  return recTop != savedTop
+end
+
+# text[a:b] becomes s, remembered for undo (kind: what it is, to group with the edit before)
+edit :: proc(a, b: Int, s: String, kind: Int) -> Bool
+  merged := false
+  r := recTop - 1
+  if textLen - (b - a) + s.len() > CAP
+    say("No room: 32 KB at most", RED)
+    return false
+  end
+  if lineCount - newlines(text[a:b].asString()) + newlines(s) > MAX_LINES
+    say("Too many lines: 4096 at most", RED)
+    return false
+  end
+  if kind > 0 and kind == merging and recTop == recCount and recTop > 0 and undoLen + (b - a) + s.len() <= UNDO_BYTES
+    if kind == 1 and a == b and recPos[r] + recIns[r] == a
+      undoPush(s)
+      recIns[r] += s.len()
+      merged = true
+    else if kind == 2 and s.len() == 0 and recIns[r] == 0 and b == recPos[r] and recDel[r] < 64
+      # (deleted bytes come before the ones already deleted: they go in front)
+      scratch.clear()
+      scratch.pushAll(undoText[recAt[r]:undoLen])
+      undoLen = recAt[r]
+      undoPush(text[a:b].asString())
+      undoPush(scratch[0:scratch.len()].asString())
+      recPos[r] = a
+      recDel[r] += b - a
+      merged = true
+    else if kind == 3 and s.len() == 0 and recIns[r] == 0 and a == recPos[r]
+      undoPush(text[a:b].asString())
+      recDel[r] += b - a
+      merged = true
+    end
+  end
+  if not merged
+    if recTop < recCount # (a new edit: what could be redone can't now)
+      recCount = recTop
+      undoLen = recAt[recTop]
+      if savedTop > recTop
+        savedTop = -1
+      end
+    end
+    if (b - a) + s.len() > UNDO_BYTES
+      if modified()
+        savedTop = -1
+      end
+      forgetAll()
+      savedTop = -1
+      say("(too big to undo)", GRAY)
+    else
+      for recCount == UNDOS or undoLen + (b - a) + s.len() > UNDO_BYTES
+        forgetOldest()
+      end
+      r = recCount
+      recPos[r] = a
+      recDel[r] = b - a
+      recIns[r] = s.len()
+      recAt[r] = undoLen
+      recBefore[r] = cursor
+      recAnchor[r] = anchor
+      undoPush(text[a:b].asString())
+      undoPush(s)
+      recCount += 1
+      recTop = recCount
+    end
+  end
+  ok := replaceRaw(a, b, s)
+  cursor = a + s.len()
+  anchor = cursor
+  wantCol = -1
+  if recTop > 0
+    recAfter[recTop - 1] = cursor
+  end
+  merging = kind
+  return ok
+end
+
+undo :: proc()
+  if recTop == 0
+    say("Nothing to undo", GRAY)
+    return
+  end
+  r := recTop - 1
+  ok := replaceRaw(recPos[r], recPos[r] + recIns[r], undoText[recAt[r]:recAt[r] + recDel[r]].asString())
+  cursor = recBefore[r]
+  anchor = recAnchor[r]
+  recTop -= 1
+  merging = 0
+  wantCol = -1
+end
+
+redo :: proc()
+  if recTop == recCount
+    say("Nothing to redo", GRAY)
+    return
+  end
+  r := recTop
+  at := recAt[r] + recDel[r]
+  ok := replaceRaw(recPos[r], recPos[r] + recDel[r], undoText[at:at + recIns[r]].asString())
+  cursor = recAfter[r]
+  anchor = cursor
+  recTop += 1
+  merging = 0
+  wantCol = -1
+end
+
+# ---------------------------------------------------------------- moving
+
+isWord :: proc(c: Int) -> Bool
+  return (c >= 97 and c <= 122) or (c >= 65 and c <= 90) or (c >= 48 and c <= 57) or c == 95
+end
+isSpace :: proc(c: Int) -> Bool
+  return c == 32 or c == 9 or c == 10
+end
+
+wordLeft :: proc(p: Int) -> Int
+  q := p
+  for q > 0 and isSpace(text[q - 1])
+    q -= 1
+  end
+  if q > 0 and isWord(text[q - 1])
+    for q > 0 and isWord(text[q - 1])
+      q -= 1
+    end
+  else
+    for q > 0 and not isWord(text[q - 1]) and not isSpace(text[q - 1])
+      q -= 1
+    end
+  end
+  return q
+end
+
+wordRight :: proc(p: Int) -> Int
+  q := p
+  for q < textLen and isSpace(text[q])
+    q += 1
+  end
+  if q < textLen and isWord(text[q])
+    for q < textLen and isWord(text[q])
+      q += 1
+    end
+  else
+    for q < textLen and not isWord(text[q]) and not isSpace(text[q])
+      q += 1
+    end
+  end
+  return q
+end
+
+# the first character on line l that isn't a space
+indentEnd :: proc(l: Int) -> Int
+  p := lineAt[l]
+  e := lineEnd(l)
+  for p < e and text[p] == 32
+    p += 1
+  end
+  return p
+end
+
+moveTo :: proc(p: Int, extend: Bool)
+  cursor = max(0, min(p, textLen))
+  if not extend
+    anchor = cursor
+  end
+  merging = 0
+end
+
+# to line l, at the column up and down keep to
+moveToLine :: proc(l: Int, extend: Bool)
+  cl := lineOf(cursor)
+  if wantCol < 0
+    wantCol = cursor - lineAt[cl]
+  end
+  target := max(0, min(l, lineCount - 1))
+  col := wantCol
+  moveTo(lineAt[target] + min(col, lineEnd(target) - lineAt[target]), extend)
+  wantCol = col
+end
+
+# ---------------------------------------------------------------- editing
+
+typeChar :: proc(c: Int)
+  if c == 32 and cursor > 0 and text[cursor - 1] != 32
+    merging = 0 # (a word and the space after it undo together)
+  end
+  one[0] = c
+  kind := 1
+  if cursor != anchor
+    kind = 0
+  end
+  ok := edit(selStart(), selEnd(), one[0:1].asString(), kind)
+end
+
+# does line l's text, after its indent, start with word w (then a space or its end)?
+startsWord :: proc(l: Int, w: String) -> Bool
+  p := indentEnd(l)
+  e := lineEnd(l)
+  if e - p < w.len()
+    return false
+  end
+  for i in 0..<w.len()
+    if text[p + i] != w[i]
+      return false
+    end
+  end
+  return p + w.len() == e or not isWord(text[p + w.len()])
+end
+
+# does line l have s in it?
+lineHas :: proc(l: Int, s: String) -> Bool
+  a := lineAt[l]
+  e := lineEnd(l)
+  for p in a..<e - s.len() + 1
+    k := 0
+    for k < s.len() and text[p + k] == s[k]
+      k += 1
+    end
+    if k == s.len()
+      return true
+    end
+  end
+  return false
+end
+
+# a line that opens a block: the next is indented one more step
+opensBlock :: proc(l: Int) -> Bool
+  return startsWord(l, "if") or startsWord(l, "else") or startsWord(l, "for") or startsWord(l, "switch") or
+         startsWord(l, "case") or lineHas(l, ":: proc") or lineHas(l, ":: struct") or lineHas(l, ":: enum") or
+         lineHas(l, ":: union")
+end
+
+enter :: proc()
+  l := lineOf(selStart())
+  indent := min(indentEnd(l), selStart()) - lineAt[l]
+  if opensBlock(l) and selStart() > indentEnd(l)
+    indent += 2
+  end
+  built.clear()
+  built.push(10)
+  for i in 0..<indent
+    built.push(32)
+  end
+  merging = 0
+  ok := edit(selStart(), selEnd(), built[0:built.len()].asString(), 0)
+end
+
+# having typed the end of `end` or `else` alone on its line, a step back out of the block
+dedent :: proc()
+  l := lineOf(cursor)
+  p := indentEnd(l)
+  if cursor != lineEnd(l) or p - lineAt[l] < 2 or not (startsWord(l, "end") or startsWord(l, "else"))
+    return
+  end
+  if cursor - p != 3 and cursor - p != 4
+    return
+  end
+  if l > 0
+    k := l - 1
+    for k > 0 and indentEnd(k) == lineEnd(k) # (blank lines)
+      k -= 1
+    end
+    if indentEnd(k) - lineAt[k] < p - lineAt[l]
+      return # (already dedented)
+    end
+  end
+  c := cursor
+  ok := edit(lineAt[l], lineAt[l] + 2, "", 0)
+  cursor = c - 2
+  anchor = cursor
+end
+
+backspace :: proc(ctrl: Bool)
+  if cursor != anchor
+    ok := edit(selStart(), selEnd(), "", 0)
+    return
+  end
+  if cursor == 0
+    return
+  end
+  if ctrl
+    ok := edit(wordLeft(cursor), cursor, "", 0)
+    return
+  end
+  l := lineOf(cursor)
+  col := cursor - lineAt[l]
+  if col > 0 and indentEnd(l) >= cursor # (in the indent: back to the step before)
+    n := 2 - col % 2
+    ok := edit(cursor - n, cursor, "", 2)
+    return
+  end
+  ok := edit(cursor - 1, cursor, "", 2)
+end
+
+deleteForward :: proc(ctrl: Bool)
+  if cursor != anchor
+    ok := edit(selStart(), selEnd(), "", 0)
+  else if cursor < textLen
+    if ctrl
+      ok := edit(cursor, wordRight(cursor), "", 0)
+    else
+      ok := edit(cursor, cursor + 1, "", 3)
+    end
+  end
+end
+
+# the lines the selection is on (or the cursor's): into first and last
+first := 0
+last := 0
+selectedLines :: proc()
+  first = lineOf(selStart())
+  last = lineOf(selEnd())
+  if last > first and lineAt[last] == selEnd()
+    last -= 1
+  end
+end
+
+# the selected lines (or the cursor's), each a step in (dir 1) or out (-1)
+indentLines :: proc(dir: Int)
+  selectedLines()
+  a := lineAt[first]
+  b := lineEnd(last)
+  had := cursor != anchor
+  c := cursor
+  built.clear()
+  for l in first..=last
+    p := lineAt[l]
+    e := lineEnd(l)
+    if dir > 0 and e > p
+      built.push(32)
+      built.push(32)
+    else if dir < 0
+      k := 0
+      for k < 2 and p < e and text[p] == 32
+        p += 1
+        k += 1
+      end
+    end
+    if built.len() + (e - p) + 1 > BUILT
+      say("Too much to indent at once", RED)
+      return
+    end
+    built.pushAll(text[p:e])
+    if l < last
+      built.push(10)
+    end
+  end
+  delta := built.len() - (b - a)
+  merging = 0
+  ok := edit(a, b, built[0:built.len()].asString(), 0)
+  if had or first != last
+    anchor = a
+    cursor = a + built.len()
+  else
+    cursor = max(a, c + delta)
+    anchor = cursor
+  end
+end
+
+tab :: proc(shift: Bool)
+  if shift or lineOf(selStart()) != lineOf(selEnd())
+    if shift
+      indentLines(-1)
+    else
+      indentLines(1)
+    end
+    return
+  end
+  col := selStart() - lineAt[lineOf(selStart())]
+  if col % 2 == 1
+    ok := edit(selStart(), selEnd(), " ", 0)
+  else
+    ok := edit(selStart(), selEnd(), "  ", 0)
+  end
+end
+
+# the selected lines (or the cursor's) moved up (dir -1) or down past their neighbor
+moveLines :: proc(dir: Int)
+  selectedLines()
+  if (dir < 0 and first == 0) or (dir > 0 and last == lineCount - 1)
+    return
+  end
+  a := lineAt[first]
+  b := lineEnd(last)
+  o := last + 1 # the neighbor
+  if dir < 0
+    o = first - 1
+  end
+  oa := lineAt[o]
+  oe := lineEnd(o)
+  if (b - a) + (oe - oa) + 1 > BUILT
+    say("Too much to move at once", RED)
+    return
+  end
+  c := cursor
+  n := anchor
+  built.clear()
+  if dir < 0
+    built.pushAll(text[a:b])
+    built.push(10)
+    built.pushAll(text[oa:oe])
+    merging = 0
+    ok := edit(oa, b, built[0:built.len()].asString(), 0)
+    cursor = c - (oe - oa) - 1
+    anchor = n - (oe - oa) - 1
+  else
+    built.pushAll(text[oa:oe])
+    built.push(10)
+    built.pushAll(text[a:b])
+    merging = 0
+    ok := edit(a, oe, built[0:built.len()].asString(), 0)
+    cursor = c + (oe - oa) + 1
+    anchor = n + (oe - oa) + 1
+  end
+end
+
+deleteLines :: proc()
+  selectedLines()
+  a := lineAt[first]
+  b := lineEnd(last)
+  if b < textLen
+    b += 1 # (the newline after)
+  else if a > 0
+    a -= 1 # (the last line: the newline before)
+  end
+  merging = 0
+  ok := edit(a, b, "", 0)
+  moveTo(lineAt[lineOf(min(a + 1, textLen))], false)
+  if a == 0
+    moveTo(0, false)
+  end
+end
+
+# ---------------------------------------------------------------- the clipboard
+
+clip: Blob[..16384]
+clipIsLine := false # copied with nothing selected: a whole line, pasted as one
+
+copy :: proc(cut: Bool)
+  a := selStart()
+  b := selEnd()
+  clipIsLine = a == b
+  if clipIsLine
+    l := lineOf(cursor)
+    a = lineAt[l]
+    b = lineEnd(l)
+    if b < textLen
+      b += 1
+    end
+  end
+  if b - a > CLIP
+    say("Too much to copy: 16 KB at most", RED)
+    return
+  end
+  clip.clear()
+  clip.pushAll(text[a:b])
+  if clipIsLine and (b == a or text[b - 1] != 10)
+    clip.push(10)
+  end
+  if cut
+    merging = 0
+    ok := edit(a, b, "", 0)
+  end
+end
+
+paste :: proc()
+  merging = 0
+  if clipIsLine and cursor == anchor # (a whole line: above this one)
+    c := cursor
+    l := lineOf(cursor)
+    ok := edit(lineAt[l], lineAt[l], clip[0:clip.len()].asString(), 0)
+    cursor = c + clip.len()
+    anchor = cursor
+    return
+  end
+  ok := edit(selStart(), selEnd(), clip[0:clip.len()].asString(), 0)
+end
+
+# ---------------------------------------------------------------- apps
+
+last: Blob[..64] # the app it had last, and where: "name cursor top" (its save file "last")
+
+# where it is, kept for next time: on opening, saving and running
+remember :: proc()
+  last.clear()
+  last.pushAll(name[0:name.len()])
+  last.format(" ", cursor, " ", top)
+  ok := pc.saveWrite("last", last[0:last.len()].asString())
+end
+
+validName :: proc(s: String) -> Bool
+  if s.len() == 0 or s.len() > 32
+    return false
+  end
+  for c in s
+    if not (isWord(c) or c == 45)
+      return false
+    end
+  end
+  return true
+end
+
+# a fresh, empty text
+fresh :: proc()
+  textLen = 0
+  cursor = 0
+  anchor = 0
+  top = 0
+  left = 0
+  wantCol = -1
+  rebuildLines()
+  forgetAll()
+  savedTop = 0
+end
+
+# app nm's source, or a new app of that name: false if it can't be had
+load :: proc(nm: String) -> Bool
+  n := pc.appSource(nm, one[0:1])
+  if n > CAP
+    say("Too big for the editor: 32 KB at most", RED)
+    return false
+  end
+  fresh()
+  name.clear()
+  for c in nm
+    name.push(c)
+  end
+  if n < 0
+    sayName("New app ", "", GRAY)
+  else
+    n = pc.appSource(nm, text[0:CAP])
+    k := 0
+    for i in 0..<n # (lines end with 10 alone)
+      if text[i] != 13
+        text[k] = text[i]
+        k += 1
+      end
+    end
+    textLen = k
+    rebuildLines()
+    sayName("", ": Ctrl+S saves, Ctrl+R runs", GRAY)
+  end
+  remember()
+  return true
+end
+
+save :: proc() -> Bool
+  if pc.appSave(name[0:name.len()].asString(), text[0:textLen].asString()) < 0
+    sayName("Couldn't save ", "", RED)
+    return false
+  end
+  savedTop = recTop
+  merging = 0
+  sayName("Saved ", "", GREEN)
+  remember()
+  return true
+end
+
+# ---------------------------------------------------------------- prompts
+
+NONE :: 0
+OPEN :: 1
+SAVE_AS :: 2
+FIND :: 3
+GO_TO :: 4
+mode := NONE
+input: Blob[..32]
+query: Blob[..48]
+confirm := 0     # an action asked for again after a warning: it goes ahead
+runAfter := false # saving as, then running
+
+# apps, for opening
+names: Blob[2048]
+nameAt: [64]Int
+nameLen: [64]Int
+appCount := 0
+shown: [64]Int
+nshown := 0
+pick := 0
+
+lower :: proc(c: Int) -> Int
+  if c >= 65 and c <= 90
+    return c + 32
+  end
+  return c
+end
+
+has :: proc(s: Blob, f: Blob) -> Bool
+  for p in 0..<s.len() - f.len() + 1
+    k := 0
+    for k < f.len() and lower(s[p + k]) == lower(f[k])
+      k += 1
+    end
+    if k == f.len()
+      return true
+    end
+  end
+  return false
+end
+
+narrow :: proc()
+  nshown = 0
+  for i in 0..<appCount
+    if has(names[nameAt[i]:nameAt[i] + nameLen[i]], input[0:input.len()])
+      shown[nshown] = i
+      nshown += 1
+    end
+  end
+  pick = max(0, min(pick, nshown - 1))
+end
+
+startOpen :: proc()
+  mode = OPEN
+  input.clear()
+  pick = 0
+  appCount = min(pc.apps(), 64)
+  at := 0
+  for i in 0..<appCount
+    nameAt[i] = at
+    nameLen[i] = min(pc.appName(i, names[at:at + 32]), 32)
+    at += nameLen[i]
+  end
+  narrow()
+end
+
+startPrompt :: proc(m: Int)
+  mode = m
+  input.clear()
+end
+
+# Ctrl+F's text, found after the selection (or from the start, after the end), and selected
+findNext :: proc()
+  f := query.len()
+  if f == 0
+    return
+  end
+  for pass in 0..<2
+    from := selEnd()
+    if pass == 1
+      from = 0
+    end
+    for p in from..<textLen - f + 1
+      k := 0
+      for k < f and lower(text[p + k]) == lower(query[k])
+        k += 1
+      end
+      if k == f
+        anchor = p
+        cursor = p + f
+        wantCol = -1
+        merging = 0
+        return
+      end
+    end
+  end
+  say("Not found", GRAY)
+end
+
+# what the prompt does with Enter
+promptDone :: proc()
+  m := mode
+  s := input[0:input.len()].asString()
+  if m == OPEN
+    nm := s
+    if nshown > 0
+      k := shown[pick]
+      nm = names[nameAt[k]:nameAt[k] + nameLen[k]].asString()
+    end
+    if not validName(nm)
+      say("A name is letters, digits, _ and -", RED)
+      return
+    end
+    if modified() and confirm != OPEN
+      sayName("Unsaved changes to ", ": Enter again drops them", ORANGE)
+      confirm = OPEN
+      return
+    end
+    confirm = 0
+    if load(nm)
+      mode = NONE
+    end
+  else if m == SAVE_AS
+    if not validName(s)
+      say("A name is letters, digits, _ and -", RED)
+      return
+    end
+    name.clear()
+    for c in s
+      name.push(c)
+    end
+    mode = NONE
+    if save() and runAfter
+      pc.launch(name[0:name.len()].asString())
+    end
+    runAfter = false
+  else if m == GO_TO
+    n := 0
+    for c in s
+      if c >= 48 and c <= 57
+        n = n * 10 + c - 48
+      end
+    end
+    mode = NONE
+    if n > 0
+      moveTo(lineAt[min(n, lineCount) - 1], false)
+      wantCol = -1
+    end
+  else if m == FIND
+    findNext()
+  end
+end
+
+promptKey :: proc(k: Int)
+  if k == 27
+    mode = NONE
+    confirm = 0
+    runAfter = false
+    return
+  end
+  if k == 13
+    promptDone()
+    return
+  end
+  if mode == FIND
+    if k == 8
+      if query.len() > 0
+        query.pop()
+      end
+    else if k >= 32 and k < 127 and query.len() < 48
+      query.push(k)
+    end
+    return
+  end
+  if k == 8
+    if input.len() > 0
+      input.pop()
+    end
+  else if k >= 32 and k < 127 and input.len() < 32
+    input.push(k)
+  else if mode == OPEN and (k & 255) == UP
+    pick = max(0, pick - 1)
+  else if mode == OPEN and (k & 255) == DOWN
+    pick = min(nshown - 1, pick + 1)
+  end
+  if mode == OPEN
+    narrow()
+  end
+end
+
+# ---------------------------------------------------------------- keys
+
+key :: proc(k: Int)
+  base := k & 255
+  shift := k & SHIFT != 0
+  ctrl := k & CTRL != 0
+  alt := k & ALT != 0
+  if mode != NONE
+    promptKey(k)
+    return
+  end
+  if base != 14 and base != 15
+    confirm = 0 # (a warning stands only until the next key)
+  end
+  if base >= 32 and base < 127 and k < 256
+    typeChar(base)
+    if base == 100 or base == 101
+      dedent()
+    end
+  else if base == 13
+    enter()
+  else if base == 8
+    backspace(ctrl or alt)
+  else if base == DELETE
+    deleteForward(ctrl or alt)
+  else if base == 9
+    tab(shift)
+  else if base == 27
+    anchor = cursor
+  else if base == LEFT
+    if cursor != anchor and not shift and not ctrl
+      moveTo(selStart(), false)
+    else if ctrl
+      moveTo(wordLeft(cursor), shift)
+    else
+      moveTo(cursor - 1, shift)
+    end
+    wantCol = -1
+  else if base == RIGHT
+    if cursor != anchor and not shift and not ctrl
+      moveTo(selEnd(), false)
+    else if ctrl
+      moveTo(wordRight(cursor), shift)
+    else
+      moveTo(cursor + 1, shift)
+    end
+    wantCol = -1
+  else if base == UP or base == DOWN
+    step := 1
+    if base == UP
+      step = -1
+    end
+    if alt
+      moveLines(step)
+    else if ctrl
+      top = max(0, min(top + step, lineCount - 1))
+    else
+      moveToLine(lineOf(cursor) + step, shift)
+    end
+  else if base == PAGE_UP or base == PAGE_DOWN
+    step := ROWS - 1
+    if base == PAGE_UP
+      step = -step
+    end
+    top = max(0, min(top + step, lineCount - 1))
+    moveToLine(lineOf(cursor) + step, shift)
+  else if base == HOME
+    if ctrl
+      moveTo(0, shift)
+    else
+      l := lineOf(cursor)
+      p := indentEnd(l)
+      if cursor == p
+        p = lineAt[l]
+      end
+      moveTo(p, shift)
+    end
+    wantCol = -1
+  else if base == KEY_END
+    if ctrl
+      moveTo(textLen, shift)
+    else
+      moveTo(lineEnd(lineOf(cursor)), shift)
+    end
+    wantCol = -1
+  else if base == 1 # Ctrl+A
+    anchor = 0
+    cursor = textLen
+  else if base == 3
+    copy(false)
+  else if base == 24
+    copy(true)
+  else if base == 22
+    paste()
+  else if base == 26 and shift
+    redo()
+  else if base == 26
+    undo()
+  else if base == 25
+    redo()
+  else if base == 11 and shift
+    deleteLines()
+  else if base == 12 # Ctrl+L: the line, and the next with each again
+    l := lineOf(cursor)
+    if cursor != anchor and lineAt[lineOf(selEnd())] == selEnd() # (whole lines already: one more)
+      l = lineOf(selEnd())
+      anchor = selStart()
+    else
+      anchor = lineAt[l]
+    end
+    if l + 1 < lineCount
+      cursor = lineAt[l + 1]
+    else
+      cursor = textLen
+    end
+  else if base == 19
+    if name.len() == 0
+      startPrompt(SAVE_AS)
+    else
+      ok := save()
+    end
+  else if base == 18 # Ctrl+R: save, then run it
+    if name.len() == 0
+      runAfter = true
+      startPrompt(SAVE_AS)
+    else if save()
+      pc.launch(name[0:name.len()].asString())
+    end
+  else if base == 15
+    startOpen()
+  else if base == 14 # Ctrl+N
+    if modified() and confirm != 14
+      say("Unsaved changes: Ctrl+N again drops them", ORANGE)
+      confirm = 14
+    else
+      confirm = 0
+      fresh()
+      name.clear()
+      say("New: Ctrl+S names and saves it", GRAY)
+    end
+  else if base == 6
+    if cursor != anchor and selEnd() - selStart() <= 48 # (what's selected, to find)
+      query.clear()
+      query.pushAll(text[selStart():selEnd()])
+    end
+    startPrompt(FIND)
+  else if base == 7
+    startPrompt(GO_TO)
+  end
+end
+
+# the cursor in view
+reveal :: proc()
+  l := lineOf(cursor)
+  col := cursor - lineAt[l]
+  if l < top
+    top = l
+  end
+  if l >= top + ROWS
+    top = l - ROWS + 1
+  end
+  if col < left
+    left = max(0, col - 8)
+  end
+  if col >= left + COLS
+    left = col - COLS + 8
+  end
+end
+
+movedAt := 0.0 # (the cursor stays lit while it moves)
+
+update* :: proc()
+  c := pc.key()
+  for c >= 0
+    was := cursor
+    key(c)
+    if cursor != was
+      movedAt = pc.time()
+    end
+    if mode == NONE
+      reveal()
+    end
+    c = pc.key()
+  end
+end
+
+# ---------------------------------------------------------------- the screen
+
+KEYWORDS :: " proc struct if else for in end return break continue import include enum union switch case is nil and or not true false "
+
+isKeyword :: proc(a, b: Int) -> Bool
+  n := b - a
+  for p in 1..<KEYWORDS.len() - n
+    if KEYWORDS[p - 1] == 32 and KEYWORDS[p + n] == 32
+      k := 0
+      for k < n and KEYWORDS[p + k] == text[a + k]
+        k += 1
+      end
+      if k == n
+        return true
+      end
+    end
+  end
+  return false
+end
+
+num: Blob[..16]
+
+drawLine :: proc(l: Int, y: Int)
+  a := lineAt[l]
+  e := lineEnd(l)
+  s0 := selStart()
+  s1 := selEnd()
+  if s0 < s1 and s0 <= e and s1 > a # (the selection's part of this line)
+    c0 := max(s0, a) - a - left
+    c1 := min(s1, e + 1) - a - left
+    c0 = max(0, c0)
+    c1 = min(COLS, c1)
+    if c1 > c0
+      pc.rect(TEXT_X + c0 * 6 - 1, y - 1, (c1 - c0) * 6, 9, SELECTED)
+    end
+  end
+  inString := 0 # its quote, while in one
+  inComment := false
+  wordEnd := a
+  wordColor := WHITE
+  runStart := -1
+  runColor := WHITE
+  for p in a..=e
+    color := WHITE
+    if p < e
+      c := text[p]
+      if inComment
+        color = LAVENDER
+      else if inString > 0
+        color = GREEN
+        if c == inString and text[p - 1] != 92
+          inString = 0
+        end
+      else if p < wordEnd
+        color = wordColor
+      else if c == 35
+        inComment = true
+        color = LAVENDER
+      else if c == 34 or c == 39
+        inString = c
+        color = GREEN
+      else if isWord(c)
+        q := p
+        for q < e and isWord(text[q])
+          q += 1
+        end
+        wordEnd = q
+        wordColor = WHITE
+        if c >= 48 and c <= 57
+          wordColor = ORANGE
+        else if isKeyword(p, q)
+          wordColor = PINK
+        else if c >= 65 and c <= 90
+          wordColor = PEACH
+        else if q < e and text[q] == 40
+          wordColor = BLUE
+        end
+        color = wordColor
+      else
+        color = GRAY
+      end
+    end
+    col := p - a - left
+    visible := p < e and col >= 0 and col < COLS
+    if runStart >= 0 and (not visible or color != runColor)
+      pc.print(text[runStart:p].asString(), TEXT_X + (runStart - a - left) * 6, y, runColor)
+      runStart = -1
+    end
+    if visible and runStart < 0
+      runStart = p
+      runColor = color
+    end
+    if col >= COLS
+      return
+    end
+  end
+end
+
+# Ctrl+O's list of apps, narrowed by what's typed
+drawOpen :: proc()
+  pc.rect(40, 24, 240, 40 + LIST_ROWS * 10, DARK)
+  pc.print("Open an app (or type a new name):", 46, 28, YELLOW)
+  pc.rect(44, 38, 232, 11, BACK)
+  pc.print(input[0:input.len()].asString(), 46, 40, WHITE)
+  pc.rect(46 + input.len() * 6, 39, 1, 9, YELLOW)
+  from := max(0, pick - LIST_ROWS + 1)
+  for row in 0..<min(nshown - from, LIST_ROWS)
+    i := from + row
+    k := shown[i]
+    y := 54 + row * 10
+    color := GRAY
+    if i == pick
+      pc.rect(44, y - 2, 232, 10, SELECTED)
+      color = WHITE
+    end
+    pc.print(names[nameAt[k]:nameAt[k] + nameLen[k]].asString(), 48, y, color)
+  end
+  if nshown == 0
+    pc.print("Enter: a new app of this name", 48, 54, DIM)
+  end
+end
+
+draw* :: proc()
+  pc.cls(BACK)
+  cl := lineOf(cursor)
+  # the title bar: the app, whether it's changed, and where the cursor is
+  pc.rect(0, 0, 320, 10, DARK)
+  if name.len() > 0
+    pc.print(name[0:name.len()].asString(), 2, 1, WHITE)
+  else
+    pc.print("(new)", 2, 1, GRAY)
+  end
+  if modified()
+    pc.print("*", 4 + max(5, name.len()) * 6, 1, ORANGE)
+  end
+  num.clear()
+  num.format("Ln ", cl + 1, ", Col ", cursor - lineAt[cl] + 1)
+  pc.print(num[0:num.len()].asString(), 318 - num.len() * 6, 1, GRAY)
+  # the lines
+  for row in 0..<ROWS
+    l := top + row
+    if l >= lineCount
+      break
+    end
+    y := TOP_Y + row * 9
+    num.clear()
+    num.format(l + 1)
+    numColor := DIM
+    if l == cl
+      numColor = GRAY
+    end
+    pc.print(num[0:num.len()].asString(), TEXT_X - 6 - num.len() * 6, y, numColor)
+    drawLine(l, y)
+  end
+  # the cursor: lit while it moves, else blinking
+  ccol := cursor - lineAt[cl] - left
+  if mode == NONE and cl >= top and cl < top + ROWS and ccol >= 0 and ccol <= COLS
+    if pc.time() - movedAt < 0.5 or (pc.time() * 2.0).toInt() % 2 == 0
+      pc.rect(TEXT_X + ccol * 6 - 1, TOP_Y + (cl - top) * 9 - 1, 1, 9, YELLOW)
+    end
+  end
+  # the bottom bar: a prompt, a message, or the keys
+  pc.rect(0, 229, 320, 11, DARK)
+  if mode == SAVE_AS or mode == GO_TO or mode == FIND
+    label := "Save as: "
+    if mode == GO_TO
+      label = "Go to line: "
+    else if mode == FIND
+      label = "Find (Enter: next): "
+    end
+    pc.print(label, 2, 231, YELLOW)
+    t := input[0:input.len()]
+    if mode == FIND
+      t = query[0:query.len()]
+    end
+    pc.print(t.asString(), 2 + label.len() * 6, 231, WHITE)
+    pc.rect(2 + (label.len() + t.len()) * 6, 230, 1, 9, YELLOW)
+  else if message.len() > 0 and pc.time() - messageAt < 4.0
+    pc.print(message[0:message.len()].asString(), 2, 231, messageColor)
+  else
+    pc.print("^O open  ^S save  ^R run  ^F find  Sys+Esc home", 2, 231, DIM)
+  end
+  if mode == OPEN
+    drawOpen()
+  end
+end
+
+# ---------------------------------------------------------------- starting
+
+# with the app it had last, where it was, else the list to open one from
+place: [3]Int # (the name's length, the cursor, the line at the top)
+lastBuf: Blob[64]
+lastLen := min(pc.saveRead("last", lastBuf[0:64]), 64)
+part := 0
+for i in 0..<max(lastLen, 0)
+  c := lastBuf[i]
+  if c == 32 and part < 2
+    part += 1
+  else if part == 0
+    place[0] += 1
+  else if c >= 48 and c <= 57
+    place[part] = place[part] * 10 + c - 48
+  end
+end
+if place[0] > 0 and validName(lastBuf[0:place[0]].asString()) and load(lastBuf[0:place[0]].asString())
+  cursor = min(place[1], textLen)
+  anchor = cursor
+  top = max(0, min(place[2], lineCount - 1))
+  reveal()
+else
+  startOpen()
+end

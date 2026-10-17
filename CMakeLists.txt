@@ -56,9 +56,9 @@ if(RINC_PLATFORM STREQUAL rp2350)
   # sources compiled here (tinyusb_host would turn the native port into a host too: it stays a device,
   # for the serial port); tusb_config.h in src/rp2350 configures both
   set(TUSB ${PICO_SDK_PATH}/lib/tinyusb/src)
-  # the firmware's bundle (docs/spec/apps.md#bundles): the apps it carries, home and the console by
-  # default (the SD card's apps of the same names take their place); RINC_HOME is the one home means
-  set(RINC_BUNDLE "${CMAKE_CURRENT_LIST_DIR}/system/home.rio|${CMAKE_CURRENT_LIST_DIR}/system/console.rio" CACHE STRING
+  # the firmware's bundle (docs/spec/apps.md#bundles): the apps it carries, home, the console and the
+  # editor by default (the SD card's apps of the same names take their place); RINC_HOME is the one home means
+  set(RINC_BUNDLE "${CMAKE_CURRENT_LIST_DIR}/system/home.rio|${CMAKE_CURRENT_LIST_DIR}/system/console.rio|${CMAKE_CURRENT_LIST_DIR}/system/edit.rio" CACHE STRING
     "the firmware's apps, their .rio files, separated by |")
   set(RINC_HOME "" CACHE STRING "the firmware's home app, by name (by default the only app, else one named home)")
   string(REPLACE "|" ";" bundleApps "${RINC_BUNDLE}")
@@ -135,7 +135,7 @@ else()
   # storage in a folder of the tests' own (never the user's): apps installed there, then run by name
   set(data ${CMAKE_CURRENT_BINARY_DIR}/test-data)
   add_test(NAME install COMMAND rinc -data ${data} -install ${CMAKE_CURRENT_LIST_DIR}/system/home.rio
-    ${CMAKE_CURRENT_LIST_DIR}/system/console.rio ${CMAKE_CURRENT_LIST_DIR}/apps/hello.rio)
+    ${CMAKE_CURRENT_LIST_DIR}/system/console.rio ${CMAKE_CURRENT_LIST_DIR}/system/edit.rio ${CMAKE_CURRENT_LIST_DIR}/apps/hello.rio)
   add_test(NAME app_by_name COMMAND rinc -data ${data} -app hello -frames 2)
   set_tests_properties(app_by_name PROPERTIES DEPENDS install PASS_REGULAR_EXPRESSION "drawn at")
   add_test(NAME app_home COMMAND rinc -data ${data} -frames 30)
@@ -143,6 +143,10 @@ else()
   add_test(NAME app_console COMMAND rinc -data ${data} -app console -frames 60
     -type "x := 6 * 7\\nsq :: proc(n: Int) -> Int\\nreturn n * n\\nend\\nsq(x)\\nnope\\nls\\n")
   set_tests_properties(app_console PROPERTIES DEPENDS install PASS_REGULAR_EXPRESSION "1764[\r\n]+> nope[\r\n]+1:1: undefined name")
+  # the editor: a new app (Ctrl+N), typed, an undo (Ctrl+Z), then saved as t1 and run (Ctrl+R)
+  add_test(NAME app_edit COMMAND rinc -data ${data} -app edit -frames 200
+    -type "\\e\\x0elog(1)\\x1alog(6 * 7 + 1000)\\x12t1\\n")
+  set_tests_properties(app_edit PROPERTIES DEPENDS install PASS_REGULAR_EXPRESSION "(^|[\r\n])1042[\r\n]")
   # an app's memory: the -m report
   add_test(NAME memory_report COMMAND rinc ${CMAKE_CURRENT_LIST_DIR}/apps/chord.rio -m)
   set_tests_properties(memory_report PROPERTIES PASS_REGULAR_EXPRESSION "fits in the 256 KB app space")
@@ -165,6 +169,11 @@ else()
   target_link_libraries(rinc_pc_test PRIVATE rinccore)
   add_test(NAME pc_declared COMMAND rinc_pc_test ${CMAKE_CURRENT_LIST_DIR}/src/core/pc.rio)
   set_tests_properties(pc_declared PROPERTIES PASS_REGULAR_EXPRESSION "pc.rio declares all [0-9]+ host procs")
+  # typed keys, as a terminal sends them, with their modifiers
+  add_executable(rinc_keys_test tests/keys.c)
+  target_link_libraries(rinc_keys_test PRIVATE rinccore)
+  add_test(NAME keys COMMAND rinc_keys_test)
+  set_tests_properties(keys PROPERTIES PASS_REGULAR_EXPRESSION "all keys came through")
   # a bundle of two apps, exported: it starts at the one -home names
   set(pair ${CMAKE_CURRENT_BINARY_DIR}/pair-game${CMAKE_EXECUTABLE_SUFFIX})
   add_test(NAME export_bundle COMMAND rinc ${CMAKE_CURRENT_LIST_DIR}/apps/bounce.rio ${CMAKE_CURRENT_LIST_DIR}/apps/hello.rio -export ${pair} -home hello)

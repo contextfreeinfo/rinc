@@ -143,17 +143,24 @@ canvas { position: absolute; inset: 0; margin: auto; image-rendering: pixelated;
     ex.axes(s(p.axes[0]), s(p.axes[1]), s(p.axes[2]), s(p.axes[3]), s(p.buttons[6] && p.buttons[6].value), s(p.buttons[7] && p.buttons[7].value));
     return b;
   };
-  // key(): typing, editing keys and Ctrl+letter; and the keys held, for the system key (Shift tapped
-  // then held, with Esc: home)
-  const editing = { ArrowLeft: 128, ArrowRight: 129, ArrowUp: 130, ArrowDown: 131, Home: 132, End: 133, Delete: 134, PageUp: 135, PageDown: 136, Tab: 9, Escape: 27 };
+  // key(): typing, and the keys that aren't characters (editing keys, Tab, Enter, Backspace, Ctrl+letter)
+  // with the modifiers held, as bits: 256 Shift, 512 Ctrl, 1024 Alt (Enter and Backspace without Shift,
+  // Esc without any); and the keys held, for the system key (Shift tapped twice, then Esc: home)
+  const editing = { ArrowLeft: 128, ArrowRight: 129, ArrowUp: 130, ArrowDown: 131, Home: 132, End: 133, Delete: 134, PageUp: 135, PageDown: 136, Tab: 9, Enter: 13, Backspace: 8 };
   const held = new Set();
   addEventListener("keydown", e => {
     held.add(e.code);
     if (keys[e.code]) { buttons |= keys[e.code]; e.preventDefault(); }
-    if (editing[e.key]) { ex.key(editing[e.key]); if (e.key === "Tab" || e.key === "Home" || e.key === "End" || e.key.startsWith("Page")) e.preventDefault(); return; }
-    if (e.ctrlKey && !e.metaKey && /^[a-z]$/i.test(e.key)) { ex.key(e.key.toLowerCase().charCodeAt(0) - 96); e.preventDefault(); return; }
-    const c = e.key.length === 1 ? e.key.charCodeAt(0) : e.key === "Enter" ? 13 : e.key === "Backspace" ? 8 : 0;
-    if (c && c < 127 && !e.ctrlKey && !e.metaKey) { ex.typed(c); if (c === 8) e.preventDefault(); }
+    const mods = (e.shiftKey ? 256 : 0) | (e.ctrlKey ? 512 : 0) | (e.altKey ? 1024 : 0);
+    if (e.key === "Escape") { ex.key(27); return; }
+    if (editing[e.key] && !e.metaKey) {
+      ex.key(editing[e.key] | (editing[e.key] < 32 && editing[e.key] !== 9 ? mods & ~256 : mods));
+      if (e.key !== "Delete" || mods) e.preventDefault();
+      return;
+    }
+    if (e.ctrlKey && !e.metaKey && /^[a-z]$/i.test(e.key)) { ex.key(e.key.toLowerCase().charCodeAt(0) - 96 | (mods & ~512)); e.preventDefault(); return; }
+    const c = e.key.length === 1 ? e.key.charCodeAt(0) : 0;
+    if (c && c < 127 && !e.ctrlKey && !e.metaKey) ex.typed(c);
   });
   addEventListener("keyup", e => { held.delete(e.code); if (keys[e.code]) buttons &= ~keys[e.code]; });
   addEventListener("blur", () => { buttons = 0; held.clear(); });

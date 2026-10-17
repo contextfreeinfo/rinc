@@ -2,8 +2,8 @@
 
 ## Tests
 
-`ctest` in a desktop build runs every app headless, runs home and the console (typing at it with
-`-type`), checks `rinc -m`, compares an exported game's screen with rinc's, checks [`pc.rio`](https://github.com/rincpc/rinc/blob/main/src/core/pc.rio) against the host procs Rinc
+`ctest` in a desktop build runs every app headless, runs home, the console and the editor (typing at
+them with `-type`), checks `rinc -m`, compares an exported game's screen with rinc's, checks [`pc.rio`](https://github.com/rincpc/rinc/blob/main/src/core/pc.rio) against the host procs Rinc
 registers, and runs every `rio` example in these docs with a headless rinc (`rinc main.rio -frames 2`),
 using the runner from Rio (`lib/rio/tests/docs.py`). The examples follow
 [Rio's conventions](https://contextfreeinfo.github.io/rio/spec/language.html#reading-the-examples): an

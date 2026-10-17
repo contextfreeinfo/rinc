@@ -43,12 +43,19 @@ it:
 | 132, 133, 134 | Home, End, Delete |
 | 135, 136 | Page Up, Page Down |
 
+A key that isn't a character (all but printable ASCII and Esc) also says which modifiers were held
+with it, as bits added on: 256 Shift, 512 Ctrl, 1024 Alt. Ctrl+Right is 129 + 512, Shift+Tab 9 + 256, and
+Ctrl+Shift+Z 26 + 256 (Ctrl+letter already says Ctrl). Enter and Backspace don't take Shift, as it's
+easily still held from typing. So `c & 255` is the key without its modifiers, and an app that doesn't
+care about them can use that.
+
 Other keys (function keys, the system key) add nothing. A Rinc drops what's typed beyond 63 keys waiting,
 and one fed text faster than that (a serial port, a paste) waits for room. Keys also hold buttons down
 while they're held (the arrows, V, C, X and Z), so an app reads them either way.
 
 A terminal's escape sequences (`ESC [ A` for up, `ESC [ 3 ~` for Delete, and so on) become the key codes
-above, so a Rinc fed by a serial terminal types the same keys.
+above, so a Rinc fed by a serial terminal types the same keys. Modifiers come as xterm sends them:
+`ESC [ 1 ; 5 C` is Ctrl+Right, `ESC [ Z` Shift+Tab, and `ESC [ 27 ; m ; k ~` key `k` with modifiers `m`.
 
 ## Time
 

@@ -67,7 +67,9 @@ static int rinc_compileApp(const char *app, size_t n) {
 
 /* the app compiled, as an image in image[]: its size, or 0 after reporting why not. list: print the
    host procs its code calls, one per line */
-static int rinc_nested; /* whether an app made runs Rio itself (pc.rio*): its page needs the compiler */
+/* whether an app made runs Rio itself (pc.rio*) or writes apps (pc.appSave): its page needs the
+   compiler, and the bundle carries sources, so its apps can be read and changed too */
+static int rinc_nested;
 static uint32_t rinc_makeImage(const char *app, size_t n, int list) {
   uint32_t size, pc; uint8_t used[rio_MAX_FFI] = {0}; int k;
   if (rinc_compileApp(app, n)) return 0;
@@ -75,7 +77,7 @@ static uint32_t rinc_makeImage(const char *app, size_t n, int list) {
   for (k = 0; k < rinc_vm.ffiCount; k++) {
     if (!used[k]) continue;
     if (list) printf("host %s\n", rinc_vm.ffi[k].name);
-    if (!strncmp(rinc_vm.ffi[k].name, "pc.rio", 6)) rinc_nested = 1;
+    if (!strncmp(rinc_vm.ffi[k].name, "pc.rio", 6) || !strcmp(rinc_vm.ffi[k].name, "pc.appSave")) rinc_nested = 1;
   }
   if (!(size = rio_saveImage(&rinc_vm, rinc_image, sizeof rinc_image))) fprintf(stderr, "rinc: can't make an image\n");
   return size;
@@ -133,9 +135,11 @@ static uint32_t rinc_carried(const char *b, size_t n) {
 
 /* apps (their .rio files), each compiled to an image, as a bundle in rinc_bundleBuf: home names the app
    home means (by default the only one, or one named home), and name the storage folder (by default the
-   home app's). Its size, or 0 after saying why not */
+   home app's). Its size, or 0 after saying why not. A bundle with an app that runs Rio or writes apps
+   (rinc_nested) carries the apps' sources instead, which it can compile */
 static uint32_t rinc_makeBundle(const char *const *apps, int n, const char *home, const char *name) {
   static rinc_App list[rinc_BUNDLE_MOST];
+  static const char *srcs[rinc_BUNDLE_MOST]; static uint32_t srcLens[rinc_BUNDLE_MOST];
   uint32_t used = 0, size; int i, k;
   if (n > rinc_BUNDLE_MOST / 2) { fprintf(stderr, "rinc: a bundle has %d apps at most\n", rinc_BUNDLE_MOST / 2); return 0; }
   for (i = 0; i < n; i++) {
@@ -152,10 +156,13 @@ static uint32_t rinc_makeBundle(const char *const *apps, int n, const char *home
     }
     rinc_setAppName(a->name);
     if (rinc_start(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, rinc_put) || !(size = rinc_makeImage(apps[i], len, 0))) return 0;
-    if (size > sizeof rinc_images - used) { fprintf(stderr, "rinc: too much to bundle\n"); return 0; }
+    if (size + len > sizeof rinc_images - used) { fprintf(stderr, "rinc: too much to bundle\n"); return 0; }
     memcpy(rinc_images + used, rinc_image, size);
     a->data = (const char *)rinc_images + used; a->len = size; a->image = 1;
     used += size;
+    memcpy(rinc_images + used, rinc_src, len); /* (and its source, for a bundle that carries those) */
+    srcs[i] = (const char *)rinc_images + used; srcLens[i] = (uint32_t)len;
+    used += (uint32_t)len;
   }
   if (!home) { /* (the only app, or one named home) */
     for (i = 0; i < n && strcmp(list[i].name, "home"); i++) {}
@@ -165,9 +172,14 @@ static uint32_t rinc_makeBundle(const char *const *apps, int n, const char *home
   }
   for (i = 0; i < n && strcmp(list[i].name, home); i++) {}
   if (i == n) { fprintf(stderr, "rinc: -home %s isn't one of the apps\n", home); return 0; }
-  { /* the files: apps/name/name.img, and apps/name/name.info for a description */
+  { /* the files: apps/name/name.img, and apps/name/name.info for a description (or apps/name/name.rio) */
     static rinc_File files[rinc_BUNDLE_MOST]; static char paths[rinc_BUNDLE_MOST][96]; int nf = 0;
     for (i = 0; i < n; i++) {
+      if (rinc_nested) {
+        snprintf(paths[nf], sizeof paths[nf], "apps/%.32s/%.32s.rio", list[i].name, list[i].name);
+        files[nf].path = paths[nf]; files[nf].data = srcs[i]; files[nf++].len = srcLens[i];
+        continue;
+      }
       snprintf(paths[nf], sizeof paths[nf], "apps/%.32s/%.32s.img", list[i].name, list[i].name);
       files[nf].path = paths[nf]; files[nf].data = list[i].data; files[nf++].len = list[i].len;
       if (!list[i].info[0]) continue;
@@ -250,15 +262,20 @@ static int rinc_saveWav(const char *path, uint32_t frames) {
   return fclose(f);
 }
 
-/* -type: what to type, as fast as the app takes it (\n Enter, \e Esc, \t Tab, \\ a backslash) */
+/* -type: what to type, as fast as the app takes it (\n Enter, \e Esc, \t Tab, \\ a backslash, and \xHH
+   a byte as a terminal sends it: \x13 Ctrl+S, \x1b[1;5C Ctrl+right) */
 static const char *rinc_typing;
+static int rinc_hex(int c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1; }
 static void rinc_typeMore(void) {
   while (rinc_typing && *rinc_typing && rinc_textRoom() > 0) {
     int c = (unsigned char)*rinc_typing++;
     if (c == '\\' && *rinc_typing) {
       c = (unsigned char)*rinc_typing++;
       if (c == 'e') { rinc_textEsc(); continue; }
-      c = c == 'n' ? 13 : c == 't' ? 9 : c;
+      if (c == 'x' && rinc_hex(rinc_typing[0]) >= 0 && rinc_hex(rinc_typing[1]) >= 0) {
+        c = rinc_hex(rinc_typing[0]) * 16 + rinc_hex(rinc_typing[1]);
+        rinc_typing += 2;
+      } else c = c == 'n' ? 13 : c == 't' ? 9 : c;
     }
     rinc_textPush(c);
   }
@@ -360,14 +377,17 @@ static uint16_t rinc_readPad(void) {
   return b;
 }
 
-/* editing keys and Ctrl+letter, for key() (typing arrives as text) */
+/* editing keys, Tab, Enter, Backspace and Ctrl+letter, with the modifiers held, for key() (typing
+   arrives as text). (Enter and Backspace don't take Shift: it's too easily held while typing) */
 static void rinc_sdlKey(const SDL_KeyboardEvent *k) {
   SDL_Keycode c = k->key;
+  int shift = (k->mod & SDL_KMOD_SHIFT) != 0, ctrl = (k->mod & SDL_KMOD_CTRL) != 0, alt = (k->mod & SDL_KMOD_ALT) != 0;
   int code = c == SDLK_LEFT ? rinc_Key_left : c == SDLK_RIGHT ? rinc_Key_right : c == SDLK_UP ? rinc_Key_up : c == SDLK_DOWN ? rinc_Key_down :
              c == SDLK_HOME ? rinc_Key_home : c == SDLK_END ? rinc_Key_end : c == SDLK_DELETE ? rinc_Key_delete :
              c == SDLK_PAGEUP ? rinc_Key_pageUp : c == SDLK_PAGEDOWN ? rinc_Key_pageDown : c == SDLK_TAB ? 9 : 0;
-  if (!code && (k->mod & SDL_KMOD_CTRL) && c >= SDLK_A && c <= SDLK_Z) code = (int)(c - SDLK_A) + 1;
-  if (code) rinc_textKey(code);
+  if (c == SDLK_RETURN || c == SDLK_KP_ENTER || c == SDLK_BACKSPACE) { code = c == SDLK_BACKSPACE ? 8 : 13; shift = 0; }
+  if (!code && ctrl && c >= SDLK_A && c <= SDLK_Z) { code = (int)(c - SDLK_A) + 1; ctrl = 0; }
+  if (code) rinc_textKey(code | rinc_textMods(shift, ctrl, alt));
 }
 
 /* the screen in a window, scaled up by whole steps; a game gets a frame every 1/60 s */
@@ -395,8 +415,6 @@ static int rinc_window(const char *title) {
       if (rinc_systemHeld() && (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_TEXT_INPUT)) continue; /* (a system combination: not the app's) */
       if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) rinc_textEsc(); /* (Esc is the app's: closing the window quits) */
       if (e.type == SDL_EVENT_TEXT_INPUT) { const char *t = e.text.text; while (*t) rinc_textPush((unsigned char)*t++); } /* (key(): typing) */
-      if (e.type == SDL_EVENT_KEY_DOWN && (e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER)) rinc_textPush(13);
-      if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_BACKSPACE) rinc_textPush(8);
       if (e.type == SDL_EVENT_KEY_DOWN) rinc_sdlKey(&e.key);
       if (e.type == SDL_EVENT_GAMEPAD_ADDED && !rinc_pad) rinc_pad = SDL_OpenGamepad(e.gdevice.which);
       if (e.type == SDL_EVENT_GAMEPAD_REMOVED && rinc_pad && SDL_GetGamepadID(rinc_pad) == e.gdevice.which) { SDL_CloseGamepad(rinc_pad); rinc_pad = 0; }
@@ -404,7 +422,7 @@ static int rinc_window(const char *title) {
     k = SDL_GetKeyboardState(0);
     rinc_buttons = rinc_readPad() | (uint16_t)(k[SDL_SCANCODE_LEFT] * rinc_Button_left | k[SDL_SCANCODE_RIGHT] * rinc_Button_right | k[SDL_SCANCODE_UP] * rinc_Button_up |
       k[SDL_SCANCODE_DOWN] * rinc_Button_down | k[SDL_SCANCODE_V] * rinc_Button_a | k[SDL_SCANCODE_C] * rinc_Button_b | k[SDL_SCANCODE_X] * rinc_Button_x | k[SDL_SCANCODE_Z] * rinc_Button_y);
-    { /* the system key: Shift tapped then held (the Windows key is the desktop's own), or a controller's guide button */
+    { /* the system key: Shift tapped twice (the Windows key is the desktop's own), or a controller's guide button */
       int other = 0, s;
       for (s = 0; s < SDL_SCANCODE_COUNT; s++) other |= k[s] && s != SDL_SCANCODE_LSHIFT && s != SDL_SCANCODE_RSHIFT;
       if (rinc_systemKey(rinc_pad && SDL_GetGamepadButton(rinc_pad, SDL_GAMEPAD_BUTTON_GUIDE), k[SDL_SCANCODE_LSHIFT] || k[SDL_SCANCODE_RSHIFT], other,
@@ -429,7 +447,7 @@ static int rinc_window(const char *title) {
     }
     if (SDL_LockTexture(tex, 0, (void **)&px, &pitch)) {
       for (y = 0; y < rinc_H; y++)
-        for (x = 0; x < rinc_W; x++) px[y * (pitch / 2) + x] = rinc_palette[rinc_screen[y][x]];
+        for (x = 0; x < rinc_W; x++) px[y * (pitch / 2) + x] = rinc_palette[rinc_shownRow(y)[x]];
       SDL_UnlockTexture(tex);
     }
     SDL_RenderClear(r);

@@ -22,12 +22,17 @@ extern uint16_t rinc_buttons;
 extern int16_t rinc_axes[6];
 /* typed text, for an app's key() (docs/spec/input.md): the platform passes what's typed, as a terminal
    sends it: printable ASCII, 13 Enter (or \n), 8 Backspace (or 127), 9 Tab, Ctrl+letter as 1-26, and
-   editing keys as ESC [ sequences, which become the key codes below */
+   editing keys as ESC [ sequences, which become the key codes below. A key that isn't a character
+   (these, Tab, Enter, Backspace, Ctrl+letter) carries the modifiers held with it, as bits: as a
+   terminal sends them, ESC [ 1 ; 5 C for Ctrl+right, ESC [ Z for Shift+Tab, ESC [ 27 ; m ; key ~
+   for the rest */
 enum { rinc_Key_left = 128, rinc_Key_right, rinc_Key_up, rinc_Key_down, rinc_Key_home, rinc_Key_end, rinc_Key_delete,
        rinc_Key_pageUp, rinc_Key_pageDown };
+enum { rinc_Mod_shift = 256, rinc_Mod_ctrl = 512, rinc_Mod_alt = 1024 };
 void rinc_textPush(int c);
 void rinc_textEsc(void);    /* the Esc key itself, for key() (the platform knows it from a terminal escape) */
-void rinc_textKey(int key); /* a key code itself (rinc_Key_*), from a platform that knows the key */
+void rinc_textKey(int key); /* a key code itself (rinc_Key_*, with rinc_Mod_*), from a platform that knows the key */
+int rinc_textMods(int shift, int ctrl, int alt); /* the rinc_Mod_* bits for these */
 int rinc_textRoom(void);    /* how many more can wait: a platform reads its serial port no faster */
 enum { rinc_Button_left = 1, rinc_Button_right = 2, rinc_Button_up = 4, rinc_Button_down = 8, rinc_Button_a = 16, rinc_Button_b = 32, rinc_Button_x = 64, rinc_Button_y = 128,
        rinc_Button_lb = 256, rinc_Button_rb = 512, rinc_Button_ls = 1024, rinc_Button_rs = 2048, rinc_Button_start = 4096, rinc_Button_back = 8192 };
@@ -46,12 +51,21 @@ int rinc_hostProcs(rio_Vm *vm);
 int rinc_compile(rio_Vm *vm, void *space, uint32_t size, const char *src, uint32_t len);
 int rinc_atLimit(const char *error); /* is this compile error about running out of something? */
 /* the system key (docs/spec/apps.md): the Windows key or a controller's guide button (sysDown), or,
-   where the system around Rinc keeps the Windows key, Shift tapped and then pressed again and held.
+   where the system around Rinc keeps the Windows key, Shift tapped twice (held the second time, or
+   with the next key right after).
    Held, it makes combinations: with Esc (escDown: Esc, or a controller's Back), home. Call each frame
    with what's down (otherDown: any other key): 1 for home. While it's held (rinc_systemHeld), what's
    typed isn't the app's */
 int rinc_systemKey(int sysDown, int shiftDown, int otherDown, int escDown);
 int rinc_systemHeld(void);
+/* the system overlay: a strip of Rinc's own over the screen's bottom rows, shown while the system key is
+   held (what it does), apart from the app's screen: a platform shows each row as rinc_shownRow gives it */
+#define rinc_OVERLAY_H 11
+extern uint8_t rinc_overlay[rinc_OVERLAY_H][rinc_W];
+extern volatile int rinc_overlayOn;
+static inline const uint8_t *rinc_shownRow(int y) {
+  return rinc_overlayOn && y >= rinc_H - rinc_OVERLAY_H ? rinc_overlay[y - (rinc_H - rinc_OVERLAY_H)] : rinc_screen[y];
+}
 /* one frame of a game: the app's update* and then draw* (each optional). 0: ran, 1: the app has
    neither (it isn't a game), -1: a runtime error (rio_error says) */
 int rinc_frame(rio_Vm *vm);
