@@ -16,7 +16,8 @@ Home is an app too (`system/home.rio`), using procs any app can:
 
 So is the console (`system/console.rio`): it runs the Rio you type in a session of its own, with
 `pc.rioStart`, `pc.rioEval` and the rest (see [Rio inside an app](../spec/rio.md)), and reads and writes
-apps with `pc.appSource`, `pc.appSave` and `pc.appDelete`. An app could be an editor the same way.
+apps with `pc.appSource`, `pc.appSave` and `pc.appDelete`. And so is the editor (`system/edit.rio`), which
+opens, saves and runs apps with the same procs.
 
-The system key with Esc always goes home: Windows+Esc, a controller's Xbox+Back, or Shift tapped and
-then held, with Esc.
+The system key with Esc always goes home: Windows+Esc, a controller's Xbox+Back, or Shift tapped twice
+and then Esc.

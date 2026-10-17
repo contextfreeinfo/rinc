@@ -28,9 +28,11 @@ or, compiled for a Rinc without a compiler, `apps/<name>/<name>.img` (a Rio imag
 space) with its description in `apps/<name>/<name>.info`. A bundle also names its **home app**, the one
 `home` means, and its **storage folder**, where its apps' save spaces go.
 
-- **The Fruit Jam's firmware** bundles home and the console by default, home as home.
+- **The Fruit Jam's firmware** bundles home, the console and the editor by default, home as home.
 - **The desktop and the web** carry none, so their programs stay small.
 - **An exported game** carries its own apps, starting at its home app. One app on its own is home.
+  It carries them compiled, unless one of them runs Rio itself or writes apps (the console, the
+  editor): then their sources, so they can be read and changed too.
 
 `home` means an app named `home` in storage if there is one, else the bundle's home app. An app on
 storage of the same name as a bundled one takes its place.
@@ -104,8 +106,9 @@ the app's. It's:
 
 - the Windows key, on a keyboard that has one and a Rinc that gets it (the Fruit Jam);
 - a controller's guide button (the Xbox button);
-- or, anywhere, Shift tapped and then pressed again and held, within 0.4 seconds: the system key for as
-  long as it's held. (A Shift held while typing other keys doesn't count, so capitals are fine.)
+- or, anywhere, Shift tapped twice, within 0.4 seconds: the system key while the second press is held,
+  and for the next key within 0.7 seconds after it's let go (so it works where Shift+Esc belongs to a
+  browser). A Shift held while typing other keys doesn't count, so capitals are fine.
 
 | combination | |
 |---|---|
@@ -125,3 +128,23 @@ The console (`system/console.rio`) is an ordinary app: Rio, typed and run in a s
 | `save name` | what's typed or pasted next, until Ctrl-D, becomes app `name`'s source (Ctrl-C gives up) |
 | `delete name` | remove app `name` |
 | `home` | back home |
+
+## The editor
+
+The editor (`system/edit.rio`) is an ordinary app too: one app's source at a time, up to 32 KB, with
+the keys of most editors. It starts with the app it had last, where it was.
+
+| keys | |
+|---|---|
+| arrows, Home, End, Page Up, Page Down | move; with Ctrl, by words and to either end; with Shift, select |
+| Ctrl+O, Ctrl+S, Ctrl+R, Ctrl+N | open an app (from a list, or a new name), save it, save and run it, start a new one |
+| Ctrl+Z, Ctrl+Y (or Ctrl+Shift+Z) | undo, redo |
+| Ctrl+X, Ctrl+C, Ctrl+V | cut, copy, paste (the line, with nothing selected) |
+| Ctrl+A, Ctrl+L | select all, select the line (and the next, again) |
+| Tab, Shift+Tab | indent, outdent (the selected lines) |
+| Alt+Up, Alt+Down, Ctrl+Shift+K | move the lines, delete them |
+| Ctrl+Backspace, Ctrl+Delete | delete a word |
+| Ctrl+F, Ctrl+G | find (Enter: the next), go to a line |
+
+Enter keeps the line's indent, and a step more after a line that opens a block (`if`, `for`, a proc and
+so on); `end` and `else` step back out as they're typed.

@@ -18,8 +18,8 @@ rinc system/home.rio system/console.rio apps/*.rio -home home -name rinc -web ri
 
 is the whole Rinc, as on the Fruit Jam. [Storage](../spec/apps.md#storage) is the browser's
 localStorage, under the bundle's storage name, so what's saved stays in that browser, for pages from the
-same site (or, from disk, the same folder). Shift tapped and then held is the system key, with Esc for
-home; on a controller it's the guide button and Back.
+same site (or, from disk, the same folder). Shift tapped twice and then Esc goes home (a browser keeps
+Shift+Esc for itself, so the second tap needn't be held); on a controller it's the guide button and Back.
 
 ## The two players
 
@@ -27,7 +27,9 @@ The desktop rinc carries two web players and gives a page the smaller one it can
 
 - **VM-only** (31 KB gzipped): runs compiled apps, the common case.
 - **With the compiler** (68 KB gzipped): for a page with an app that runs Rio itself
-  ([`pc.rio*`](../spec/rio.md), as the console does). It also runs apps saved to storage, from source.
+  ([`pc.rio*`](../spec/rio.md), as the console does) or writes apps (`pc.appSave`, as the editor does).
+  It also runs apps saved to storage, from source, and such a page carries its apps as source, so the
+  editor can open them.
 
 They're built in when the desktop rinc is configured with `-DRINC_WEB_WASM=rinc.wasm` and
 `-DRINC_WEB_WASM_FULL=rinc-full.wasm`, which the CI does for the releases. Making them takes zig

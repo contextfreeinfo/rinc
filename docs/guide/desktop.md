@@ -20,7 +20,8 @@ rinc app.rio -m                   how near the app comes to its limits (see memo
 rinc app.rio -frames 120          no window: run 120 frames (A held for the first 3)
   -o screen.ppm                   then save the screen
   -wav sound.wav                  and the sound those frames made
-  -type 'x := 1\nlog(x)\n'        and type this, as fast as the app takes it (\n Enter, \e Esc, \t Tab)
+  -type 'x := 1\nlog(x)\n'        and type this, as fast as the app takes it (\n Enter, \e Esc, \t Tab,
+                                  \xHH a byte as a terminal sends it: \x13 Ctrl+S, \x1b[1;5C Ctrl+right)
 rinc app.rio -i app.img           compile to an image, and list the host procs its code calls
 rinc a.rio b.rio -export game     a program to hand out (game.exe on Windows): rinc with the apps in it
   -home a                         the one it starts at (by default the only one, or one named home)
@@ -31,7 +32,7 @@ rinc -help                        all this; and rinc -license, the licenses of w
 ```
 
 In a window, the arrows and V, C, X and Z are the buttons, any controller SDL knows is player 1 (Xbox,
-PlayStation, Switch and more), and Esc is the app's. The system key is Shift tapped and then held (the
+PlayStation, Switch and more), and Esc is the app's. The system key is Shift tapped twice (the
 operating system keeps the Windows key), or a controller's guide button; with Esc (or Back) it goes home.
 
 ## Storage
@@ -52,7 +53,7 @@ systems have it). Rinc itself never goes on the network. `rinc -install mygame.r
 your own in. Apps only see their Rinc's folder, never the rest of the computer.
 
 `ctest --test-dir build-desktop -C Release` runs every app headless, checks that an exported game draws
-exactly what rinc does, runs home and the console (typing at it), checks `pc.rio`, and runs the examples
+exactly what rinc does, runs home, the console and the editor (typing at them), checks `pc.rio`, and runs the examples
 in these docs.
 
 ## Exported games

@@ -1,7 +1,7 @@
 # The apps as web pages, on GitHub Pages (rincpc.com): each push to main builds the web player and a
-# headless rinc, makes a page of each app (rinc -web), a page of the whole Rinc (home, the console and
-# every app), and an index linking them, from each app's first comment line, and the docs (mdbook, from
-# docs/) under /docs.
+# headless rinc, makes a page of each app (rinc -web), a page of the whole Rinc (home, the console, the
+# editor and every app), and an index linking them, from each app's first comment line, and the docs
+# (mdbook, from docs/) under /docs.
 name: pages
 
 on:
@@ -43,7 +43,7 @@ jobs:
             echo 'main{max-width:720px;margin:auto}a{color:#ffec27}h1{font-size:22px}li{margin:10px 0}p{color:#c2c3c7}</style>'
             echo '</head><body><main><h1>Rinc apps</h1>'
             echo '<p>Rinc apps, playing in the browser: the same Rio VM as on the board and the desktop. Arrows and V C X Z, or a controller. <a href="docs/">Docs</a>: making apps, and what a Rinc provides.</p>'
-            echo '<p><a href="rinc.html">The whole Rinc</a>: home, the console and every app below, as on the Fruit Jam. What you save stays in this browser. Shift tapped then held, with Esc, goes home.</p><ul>'
+            echo '<p><a href="rinc.html">The whole Rinc</a>: home, the console, the editor and every app below, as on the Fruit Jam. What you save stays in this browser. Shift tapped twice and then Esc goes home.</p><ul>'
             demos=""
             for app in apps/*.rio; do
               name=$(basename "$app" .rio)
@@ -55,7 +55,7 @@ jobs:
             done
             echo '</ul><p><a href="docs/">Docs</a> &middot; <a href="https://github.com/rincpc/rinc">Source</a></p></main></body></html>'
           } > site/index.html
-          build/rinc system/home.rio system/console.rio $demos -home home -name rinc -web site/rinc.html
+          build/rinc system/home.rio system/console.rio system/edit.rio $demos -home home -name rinc -web site/rinc.html
           ls -l site
       - name: Make the docs
         run: |

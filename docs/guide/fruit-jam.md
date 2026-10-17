@@ -15,8 +15,8 @@ cmake --build build --target flash   # picotool reboots the running board into B
 The first time (or if the board isn't answering on USB), hold BOOT while resetting it and copy
 `build/rinc.uf2` to the drive that appears.
 
-The firmware's bundle is a build setting: `RINC_BUNDLE`, its apps' `.rio` files separated by `|` (home
-and the console by default), and `RINC_HOME`, the one home means (by default the only app, or one named
+The firmware's bundle is a build setting: `RINC_BUNDLE`, its apps' `.rio` files separated by `|` (home,
+the console and the editor by default), and `RINC_HOME`, the one home means (by default the only app, or one named
 home). A firmware of your own apps is just a different list:
 
 ```sh
@@ -28,7 +28,7 @@ cmake -S . -B build -G Ninja "-DRINC_BUNDLE=$PWD/apps/breakout.rio|$PWD/system/c
 Rinc starts at home on the HDMI screen (640x480, each pixel 2x2): the apps on the SD card, sorted, and
 the console. Type to narrow the list, up and down (or the d-pad) to choose, Enter (or A) to start. The
 system key with Esc comes back home from anywhere: Windows+Esc, a controller's Xbox+Back, or Shift tapped
-and then held, with Esc. Esc and Ctrl+C alone belong to apps. A keyboard's volume knob or keys set the volume (both
+twice and then Esc. Esc and Ctrl+C alone belong to apps. A keyboard's volume knob or keys set the volume (both
 outputs, in 2.5 dB steps, and mute).
 
 An app that isn't a game, or one that stops with an error, leaves its log and the error on the screen,
@@ -49,8 +49,8 @@ as `send.py`. A serial terminal sees each line once it's entered, not as it's ty
 
 ## Apps on the SD card
 
-The firmware carries home and the console; an app of the same name on the card takes its place, so a
-home or console of your own goes there. A FAT32 card holds apps as `/rinc/apps/name/name.rio` (and each
+The firmware carries home, the console and the editor; an app of the same name on the card takes its
+place, so a home, console or editor of your own goes there. A FAT32 card holds apps as `/rinc/apps/name/name.rio` (and each
 app's own files in `/rinc/save/name`), managed from the console with `ls`, `run`,
 `load`, `save`, `delete` and `home` (see [the console](../spec/apps.md#the-console)). From a PC,
 `uv run tools/send.py apps/*.rio --save` puts apps on the card over USB serial, and

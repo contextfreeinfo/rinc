@@ -13,7 +13,8 @@ const char rinc_help[] =
   "  rinc app.rio -frames 120   no window: run 120 frames (A held for the first 3)\n"
   "    -o screen.ppm            then save the screen\n"
   "    -wav sound.wav           and the sound those frames made\n"
-  "    -type 'log(1)\\n'         and type this, as fast as the app takes it (\\n Enter, \\e Esc, \\t Tab)\n"
+  "    -type 'log(1)\\n'         and type this, as fast as the app takes it (\\n Enter, \\e Esc, \\t Tab,\n"
+  "                             \\xHH a byte as a terminal sends it: \\x13 Ctrl+S, \\x1b[1;5C Ctrl+right)\n"
   "  rinc app.rio -i app.img    compile to an image, and list the host procs its code calls\n"
   "  rinc a.rio b.rio -export game\n"
   "                             a program to hand out (game.exe on Windows): rinc with the apps in it\n"
@@ -27,8 +28,8 @@ const char rinc_help[] =
   "Storage is a rinc folder in your user data: %APPDATA% on Windows, ~/Library/Application Support on\n"
   "macOS, else $XDG_DATA_HOME or ~/.local/share. Apps keep to it, each with a save space of its own.\n"
   "\n"
-  "Playing: the arrows and V, C, X and Z, or a controller. Shift tapped then held is the system key\n"
-  "(a controller's guide button): with Esc (or Back), home. Docs: https://rincpc.com/docs/\n";
+  "Playing: the arrows and V, C, X and Z, or a controller. Shift tapped twice is the system key (a\n"
+  "controller's guide button): then Esc (or Back), home. Docs: https://rincpc.com/docs/\n";
 
 const char rinc_license[] =
   "Rinc\n"

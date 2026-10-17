@@ -114,11 +114,11 @@ rinc_EXPORT(axes) void rinc_webAxes(int lx, int ly, int rx, int ry, int lt, int 
 }
 /* the next frames of sound (at most 2048), as 16-bit stereo */
 rinc_EXPORT(mix) int16_t *rinc_webMix(int frames) { rinc_audioMix(rinc_sound, frames < 2048 ? frames : 2048); return rinc_sound; }
-/* the screen as RGBA bytes for a canvas */
+/* the screen as RGBA bytes for a canvas (with the system overlay, while it's up) */
 rinc_EXPORT(pixels) uint32_t *rinc_webPixels(void) {
   int i;
   for (i = 0; i < rinc_W * rinc_H; i++) {
-    uint16_t c = rinc_palette[((const uint8_t *)rinc_screen)[i]];
+    uint16_t c = rinc_palette[rinc_shownRow(i / rinc_W)[i % rinc_W]];
     uint32_t r = (uint32_t)(c >> 11) * 255 / 31, g = (uint32_t)(c >> 5 & 63) * 255 / 63, b = (uint32_t)(c & 31) * 255 / 31;
     rinc_rgba[i] = 0xFF000000u | b << 16 | g << 8 | r;
   }

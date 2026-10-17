@@ -18,7 +18,8 @@ print* :: @host proc(s: String, x, y, c: Int)        # text, in the 5x8 font, 6 
 # sticks pressed in, 12 Start, 13 Back
 btn* :: @host proc(i: Int) -> Int
 # the next key typed, or -1: 32-126 as typed, 13 Enter, 8 Backspace, 9 Tab, 27 Esc, Ctrl+letter as 1-26,
-# and 128 left, 129 right, 130 up, 131 down, 132 Home, 133 End, 134 Delete, 135 Page Up, 136 Page Down
+# and 128 left, 129 right, 130 up, 131 down, 132 Home, 133 End, 134 Delete, 135 Page Up, 136 Page Down;
+# a key that isn't a character with the modifiers held added on: 256 Shift, 512 Ctrl, 1024 Alt
 key* :: @host proc() -> Int
 # a controller's sticks: 0 left x, 1 left y, 2 right x, 3 right y; -1 to 1, + right and down
 stick* :: @host proc(i: Int) -> Float
