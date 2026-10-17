@@ -426,7 +426,13 @@ static void rinc_hostFromhex(rio_Vm *v, rio_Val *a) {
   a[0].u = k;
 }
 
-static void rinc_logLine(void *ud, const char *s, int n) { (void)ud; rinc_put(s, n); rinc_put("\r\n", 2); }
+int rinc_game, rinc_showLog;
+/* what an app logs, and what Rinc says about it: to the platform, and on the screen while rinc_showLog */
+static void rinc_out(const char *s, int n) { rinc_put(s, n); if (rinc_showLog) rinc_consolePut(s, n); }
+void rinc_say(const char *s) { rinc_out(s, (int)strlen(s)); }
+static void rinc_logLine(void *ud, const char *s, int n) { (void)ud; rinc_out(s, n); rinc_out("\r\n", 2); }
+/* the way home: on the screen (it's for whoever's looking at it), not in what's printed */
+static void rinc_back(void) { static const char s[] = "\r\n(Sys+Esc: back home)\r\n"; if (rinc_showLog) rinc_consolePut(s, (int)sizeof s - 1); }
 
 int rinc_start(rio_Vm *vm, void *mem, uint32_t memsize, void (*put)(const char *s, int n)) {
   rinc_put = put;
@@ -509,6 +515,67 @@ int rinc_hostProcs(rio_Vm *vm) {
 }
 
 /* a game's frame: update then draw */
+/* starting an app, the same on every Rinc: rinc_appBegin, then its source read (into the top of the app
+   space, where it compiles), then rinc_appRun. Whatever goes wrong goes on the screen, with the way home
+   (and, when it ran out of something, how near each limit it came) */
+static rio_Usage rinc_usage;
+int rinc_appBegin(rio_Vm *vm, void *space, uint32_t size, const char *name, void (*put)(const char *s, int n)) {
+  rinc_game = 0;
+  rinc_showLog = 1;
+  rinc_put = put;
+  rinc_consoleClear(1);
+  if (rinc_start(vm, space, size, put)) { rinc_say("can't start rio"); rinc_back(); return -1; }
+  rinc_setAppName(name);
+  return 0;
+}
+void rinc_appFail(const char *name, const char *why) {
+  rinc_say(name); rinc_say(why); rinc_back();
+}
+int rinc_appRun(rio_Vm *vm, void *space, uint32_t size, const char *name, const char *src, uint32_t len, const void *image) {
+  int res, fn;
+  if (image) res = rio_loadImage(vm, image, len);
+  else {
+#ifdef rio_NO_COMPILER
+    (void)space; (void)size; (void)src;
+    rinc_appFail(name, ": this Rinc runs compiled apps only");
+    return -1;
+#else
+    rio_trackUsage(vm, &rinc_usage);
+    if ((res = rinc_compile(vm, space, size, src, len)) > 0) { rinc_appFail(name, ".rio: too big (64 KB is the most)"); return -1; }
+#endif
+  }
+  if (res) {
+    rinc_say(name); rinc_say(image ? ": " : ".rio:"); rinc_say(rio_error(vm));
+#ifndef rio_NO_COMPILER
+    if (!image && rinc_atLimit(rio_error(vm))) {
+      static char text[1024];
+      int k, m = rio_usageText(&rinc_usage, text, sizeof text);
+      rinc_say("\r\n");
+      for (k = 0; k < m; k++) rinc_out(text[k] == '\n' ? "\r\n" : text + k, text[k] == '\n' ? 2 : 1);
+    }
+#endif
+    rinc_back();
+    return -1;
+  }
+  if (rio_run(vm) || ((fn = rio_findProc(vm, "main")) >= 0 && rio_call(vm, fn))) {
+    rinc_say(name); rinc_say(".rio:"); rinc_say(rio_error(vm)); rinc_back();
+    return -1;
+  }
+  if (rio_findProc(vm, "update") >= 0 || rio_findProc(vm, "draw") >= 0) { rinc_game = 1; rinc_showLog = 0; }
+  else { rinc_consolePut("\r\n(done)", 8); rinc_back(); }
+  return 0;
+}
+int rinc_gameFrame(rio_Vm *vm) {
+  int res;
+  if (!rinc_game) return 1;
+  if ((res = rinc_frame(vm)) != 0) { /* an error, or no update or draw any more */
+    rinc_game = 0; rinc_showLog = 1; rinc_audioReset(); rinc_consoleClear(1);
+    rinc_say(res < 0 ? rio_error(vm) : "nothing to run: define update* or draw*");
+    rinc_back();
+  }
+  return res;
+}
+
 int rinc_frame(rio_Vm *vm) {
   int u = rio_findProc(vm, "update"), d = rio_findProc(vm, "draw");
   /* the left stick pushed well over also counts as the arrows, as on PICO-8 */
@@ -692,7 +759,7 @@ void rinc_replStop(rinc_Repl *r, const char *why) {
 }
 
 /* the commands for apps on storage */
-static void rinc_say(rinc_Repl *r, const char *s) { r->put(s, (int)strlen(s)); }
+static void rinc_replSay(rinc_Repl *r, const char *s) { r->put(s, (int)strlen(s)); }
 static int rinc_replAppPath(char *path, size_t cap, const char *name, int n) {
   int i;
   if (n < 1 || n > 32) return 0;
@@ -703,7 +770,7 @@ static int rinc_replAppPath(char *path, size_t cap, const char *name, int n) {
 /* source, fed in as if typed, into a fresh session: from storage (src NULL) or from memory */
 static int rinc_feed(rinc_Repl *r, const char *src, int len) {
   char buf[256]; int got, i, echo = r->echo, at = 0;
-  if (r->restart && r->restart()) { rinc_say(r, "can't start a fresh session\r\n"); return -1; }
+  if (r->restart && r->restart()) { rinc_replSay(r, "can't start a fresh session\r\n"); return -1; }
   r->loading = 1; r->errors = 0; r->echo = 0; r->n = 0; r->line0 = r->cur = r->scr = 0; r->run = 0;
   r->esc = 0; r->saving = 0; /* (nothing half typed carries over: an Esc that began a key's escape, say) */
   for (;;) {
@@ -718,12 +785,12 @@ static int rinc_feed(rinc_Repl *r, const char *src, int len) {
 }
 static void rinc_load(rinc_Repl *r, const char *name, int n, int run) {
   char path[96]; int errors;
-  if (!rinc_replAppPath(path, sizeof path, name, n)) { rinc_say(r, "names are letters, digits, _ and -\r\n"); return; }
-  if (!rinc_fs || rinc_fs->open(path, 0)) { rinc_say(r, rinc_fs ? "can't open " : "no storage: "); rinc_say(r, path); rinc_say(r, "\r\n"); return; }
+  if (!rinc_replAppPath(path, sizeof path, name, n)) { rinc_replSay(r, "names are letters, digits, _ and -\r\n"); return; }
+  if (!rinc_fs || rinc_fs->open(path, 0)) { rinc_replSay(r, rinc_fs ? "can't open " : "no storage: "); rinc_replSay(r, path); rinc_replSay(r, "\r\n"); return; }
   errors = rinc_feed(r, 0, 0);
   rinc_fs->close();
   if (errors < 0) return;
-  rinc_say(r, errors ? "loaded, with errors: " : "loaded "); rinc_say(r, path); rinc_say(r, "\r\n");
+  rinc_replSay(r, errors ? "loaded, with errors: " : "loaded "); rinc_replSay(r, path); rinc_replSay(r, "\r\n");
   if (run && !errors) r->run = 1;
 }
 int rinc_replApp(rinc_Repl *r, const char *name, int run) { rinc_load(r, name, (int)strlen(name), run); return r->run ? 0 : -1; }
@@ -736,10 +803,10 @@ static void rinc_saveFlush(rinc_Repl *r) { if (r->nout && rinc_fs->write(r->out,
 static void rinc_saveChar(rinc_Repl *r, int c) { /* while saving: everything typed goes to the file, until Ctrl-D */
   if (c == 4 || c == 3) {
     rinc_saveFlush(r);
-    rinc_say(r, rinc_PAINT_PLAIN "\r\n");
-    if (rinc_fs->close() || r->saving < 0) rinc_say(r, "couldn't save it all\r\n");
-    else if (c == 4) { char b[48]; rinc_say(r, "saved "); r->put(b, snprintf(b, sizeof b, "%d bytes\r\n", r->saved)); }
-    else rinc_say(r, "gave up (the file has what came before)\r\n");
+    rinc_replSay(r, rinc_PAINT_PLAIN "\r\n");
+    if (rinc_fs->close() || r->saving < 0) rinc_replSay(r, "couldn't save it all\r\n");
+    else if (c == 4) { char b[48]; rinc_replSay(r, "saved "); r->put(b, snprintf(b, sizeof b, "%d bytes\r\n", r->saved)); }
+    else rinc_replSay(r, "gave up (the file has what came before)\r\n");
     r->saving = 0; rinc_prompt(r); return;
   }
   if (c == '\n' && r->cr) { r->cr = 0; return; } /* (\r\n: one line break) */
@@ -752,9 +819,9 @@ static void rinc_saveChar(rinc_Repl *r, int c) { /* while saving: everything typ
 }
 static void rinc_save(rinc_Repl *r, const char *name, int n) {
   char path[96];
-  if (!rinc_replAppPath(path, sizeof path, name, n)) { rinc_say(r, "names are letters, digits, _ and -\r\n"); return; }
-  if (!rinc_fs || rinc_fs->open(path, 1)) { rinc_say(r, rinc_fs ? "can't write " : "no storage: "); rinc_say(r, path); rinc_say(r, "\r\n"); return; }
-  rinc_say(r, "saving "); rinc_say(r, path); rinc_say(r, ": type or paste it, then Ctrl-D (Ctrl-C gives up)\r\n");
+  if (!rinc_replAppPath(path, sizeof path, name, n)) { rinc_replSay(r, "names are letters, digits, _ and -\r\n"); return; }
+  if (!rinc_fs || rinc_fs->open(path, 1)) { rinc_replSay(r, rinc_fs ? "can't write " : "no storage: "); rinc_replSay(r, path); rinc_replSay(r, "\r\n"); return; }
+  rinc_replSay(r, "saving "); rinc_replSay(r, path); rinc_replSay(r, ": type or paste it, then Ctrl-D (Ctrl-C gives up)\r\n");
   r->saving = 1; r->saved = 0; r->nout = 0; r->cr = 0;
 }
 /* a command line? (only as a whole input of its own) */
@@ -766,18 +833,18 @@ static int rinc_command(rinc_Repl *r) {
   for (w = 0; w < n && s[w] != ' '; w++) {}
   if (w == 4 && n == 4 && !memcmp(s, "home", 4)) { memcpy(rinc_launchName, "home", 5); rinc_launch = 1; return 1; } /* (the platform goes back to it) */
   if (w == 2 && n == 2 && !memcmp(s, "ls", 2)) {
-    if (!rinc_fs) rinc_say(r, "no storage\r\n");
-    else if (rinc_findApps() < 0) rinc_say(r, "no apps (or no card): /rinc/apps\r\n");
-    else { int i; for (i = 0; i < rinc_appCount; i++) { rinc_say(r, rinc_appNames[i]); rinc_say(r, "  "); } rinc_say(r, rinc_appCount ? "\r\n" : "(none yet)\r\n"); }
+    if (!rinc_fs) rinc_replSay(r, "no storage\r\n");
+    else if (rinc_findApps() < 0) rinc_replSay(r, "no apps (or no card): /rinc/apps\r\n");
+    else { int i; for (i = 0; i < rinc_appCount; i++) { rinc_replSay(r, rinc_appNames[i]); rinc_replSay(r, "  "); } rinc_replSay(r, rinc_appCount ? "\r\n" : "(none yet)\r\n"); }
     return 1;
   }
   if (n > w + 1 && ((w == 4 && !memcmp(s, "load", 4)) || (w == 3 && !memcmp(s, "run", 3)))) { rinc_load(r, s + w + 1, n - w - 1, w == 3); return 1; }
   if (n > w + 1 && w == 4 && !memcmp(s, "save", 4)) { rinc_save(r, s + w + 1, n - w - 1); return 1; }
   if (n > w + 1 && w == 6 && !memcmp(s, "delete", 6)) {
     char path[96]; const char *name = s + w + 1; int k = n - w - 1;
-    if (!rinc_replAppPath(path, sizeof path, name, k)) rinc_say(r, "names are letters, digits, _ and -\r\n");
-    else if (!rinc_fs || rinc_fs->remove(path)) { rinc_say(r, "can't delete "); rinc_say(r, path); rinc_say(r, "\r\n"); }
-    else { path[strlen(path) - (size_t)k - 5] = 0; rinc_fs->remove(path); rinc_say(r, "deleted "); r->put(name, k); rinc_say(r, "\r\n"); } /* (then its folder, if empty) */
+    if (!rinc_replAppPath(path, sizeof path, name, k)) rinc_replSay(r, "names are letters, digits, _ and -\r\n");
+    else if (!rinc_fs || rinc_fs->remove(path)) { rinc_replSay(r, "can't delete "); rinc_replSay(r, path); rinc_replSay(r, "\r\n"); }
+    else { path[strlen(path) - (size_t)k - 5] = 0; rinc_fs->remove(path); rinc_replSay(r, "deleted "); r->put(name, k); rinc_replSay(r, "\r\n"); } /* (then its folder, if empty) */
     return 1;
   }
   return 0;

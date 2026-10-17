@@ -235,7 +235,7 @@ edit :: proc(a, b: Int, s: String, kind: Int) -> Bool
       undoPush(s)
       recIns[r] += s.len()
       merged = true
-    else if kind == 2 and s.len() == 0 and recIns[r] == 0 and b == recPos[r] and recDel[r] < 64
+    case kind == 2 and s.len() == 0 and recIns[r] == 0 and b == recPos[r] and recDel[r] < 64
       # (deleted bytes come before the ones already deleted: they go in front)
       scratch.clear()
       scratch.pushAll(undoText[recAt[r]:undoLen])
@@ -245,7 +245,7 @@ edit :: proc(a, b: Int, s: String, kind: Int) -> Bool
       recPos[r] = a
       recDel[r] += b - a
       merged = true
-    else if kind == 3 and s.len() == 0 and recIns[r] == 0 and a == recPos[r]
+    case kind == 3 and s.len() == 0 and recIns[r] == 0 and a == recPos[r]
       undoPush(text[a:b].asString())
       recDel[r] += b - a
       merged = true
@@ -441,9 +441,9 @@ lineHas :: proc(l: Int, s: String) -> Bool
   return false
 end
 
-# a line that opens a block: the next is indented one more step
+# a line that opens a block: the next is indented one more step (not a switch: its cases line up with it)
 opensBlock :: proc(l: Int) -> Bool
-  return startsWord(l, "if") or startsWord(l, "else") or startsWord(l, "for") or startsWord(l, "switch") or
+  return startsWord(l, "if") or startsWord(l, "else") or startsWord(l, "for") or
          startsWord(l, "case") or lineHas(l, ":: proc") or lineHas(l, ":: struct") or lineHas(l, ":: enum") or
          lineHas(l, ":: union")
 end
@@ -463,11 +463,11 @@ enter :: proc()
   ok := edit(selStart(), selEnd(), built[0:built.len()].asString(), 0)
 end
 
-# having typed the end of `end` or `else` alone on its line, a step back out of the block
+# having typed the end of `end`, `else` or `case` alone on its line, a step back out of the block
 dedent :: proc()
   l := lineOf(cursor)
   p := indentEnd(l)
-  if cursor != lineEnd(l) or p - lineAt[l] < 2 or not (startsWord(l, "end") or startsWord(l, "else"))
+  if cursor != lineEnd(l) or p - lineAt[l] < 2 or not (startsWord(l, "end") or startsWord(l, "else") or startsWord(l, "case"))
     return
   end
   if cursor - p != 3 and cursor - p != 4
@@ -513,7 +513,7 @@ end
 deleteForward :: proc(ctrl: Bool)
   if cursor != anchor
     ok := edit(selStart(), selEnd(), "", 0)
-  else if cursor < textLen
+  case cursor < textLen
     if ctrl
       ok := edit(cursor, wordRight(cursor), "", 0)
     else
@@ -547,7 +547,7 @@ indentLines :: proc(dir: Int)
     if dir > 0 and e > p
       built.push(32)
       built.push(32)
-    else if dir < 0
+    case dir < 0
       k := 0
       for k < 2 and p < e and text[p] == 32
         p += 1
@@ -638,7 +638,7 @@ deleteLines :: proc()
   b := lineEnd(last)
   if b < textLen
     b += 1 # (the newline after)
-  else if a > 0
+  case a > 0
     a -= 1 # (the last line: the newline before)
   end
   merging = 0
@@ -897,7 +897,7 @@ promptDone :: proc()
     if load(nm)
       mode = NONE
     end
-  else if m == SAVE_AS
+  case m == SAVE_AS
     if not validName(s)
       say("A name is letters, digits, _ and -", RED)
       return
@@ -911,7 +911,7 @@ promptDone :: proc()
       pc.launch(name[0:name.len()].asString())
     end
     runAfter = false
-  else if m == GO_TO
+  case m == GO_TO
     n := 0
     for c in s
       if c >= 48 and c <= 57
@@ -923,7 +923,7 @@ promptDone :: proc()
       moveTo(lineAt[min(n, lineCount) - 1], false)
       wantCol = -1
     end
-  else if m == FIND
+  case m == FIND
     findNext()
   end
 end
@@ -944,7 +944,7 @@ promptKey :: proc(k: Int)
       if query.len() > 0
         query.pop()
       end
-    else if k >= 32 and k < 127 and query.len() < 48
+    case k >= 32 and k < 127 and query.len() < 48
       query.push(k)
     end
     return
@@ -953,11 +953,11 @@ promptKey :: proc(k: Int)
     if input.len() > 0
       input.pop()
     end
-  else if k >= 32 and k < 127 and input.len() < 32
+  case k >= 32 and k < 127 and input.len() < 32
     input.push(k)
-  else if mode == OPEN and (k & 255) == UP
+  case mode == OPEN and (k & 255) == UP
     pick = max(0, pick - 1)
-  else if mode == OPEN and (k & 255) == DOWN
+  case mode == OPEN and (k & 255) == DOWN
     pick = min(nshown - 1, pick + 1)
   end
   if mode == OPEN
@@ -984,54 +984,54 @@ key :: proc(k: Int)
     if base == 100 or base == 101
       dedent()
     end
-  else if base == 13
+  case base == 13
     enter()
-  else if base == 8
+  case base == 8
     backspace(ctrl or alt)
-  else if base == DELETE
+  case base == DELETE
     deleteForward(ctrl or alt)
-  else if base == 9
+  case base == 9
     tab(shift)
-  else if base == 27
+  case base == 27
     anchor = cursor
-  else if base == LEFT
+  case base == LEFT
     if cursor != anchor and not shift and not ctrl
       moveTo(selStart(), false)
-    else if ctrl
+    case ctrl
       moveTo(wordLeft(cursor), shift)
     else
       moveTo(cursor - 1, shift)
     end
     wantCol = -1
-  else if base == RIGHT
+  case base == RIGHT
     if cursor != anchor and not shift and not ctrl
       moveTo(selEnd(), false)
-    else if ctrl
+    case ctrl
       moveTo(wordRight(cursor), shift)
     else
       moveTo(cursor + 1, shift)
     end
     wantCol = -1
-  else if base == UP or base == DOWN
+  case base == UP or base == DOWN
     step := 1
     if base == UP
       step = -1
     end
     if alt
       moveLines(step)
-    else if ctrl
+    case ctrl
       top = max(0, min(top + step, lineCount - 1))
     else
       moveToLine(lineOf(cursor) + step, shift)
     end
-  else if base == PAGE_UP or base == PAGE_DOWN
+  case base == PAGE_UP or base == PAGE_DOWN
     step := ROWS - 1
     if base == PAGE_UP
       step = -step
     end
     top = max(0, min(top + step, lineCount - 1))
     moveToLine(lineOf(cursor) + step, shift)
-  else if base == HOME
+  case base == HOME
     if ctrl
       moveTo(0, shift)
     else
@@ -1043,31 +1043,31 @@ key :: proc(k: Int)
       moveTo(p, shift)
     end
     wantCol = -1
-  else if base == KEY_END
+  case base == KEY_END
     if ctrl
       moveTo(textLen, shift)
     else
       moveTo(lineEnd(lineOf(cursor)), shift)
     end
     wantCol = -1
-  else if base == 1 # Ctrl+A
+  case base == 1 # Ctrl+A
     anchor = 0
     cursor = textLen
-  else if base == 3
+  case base == 3
     copy(false)
-  else if base == 24
+  case base == 24
     copy(true)
-  else if base == 22
+  case base == 22
     paste()
-  else if base == 26 and shift
+  case base == 26 and shift
     redo()
-  else if base == 26
+  case base == 26
     undo()
-  else if base == 25
+  case base == 25
     redo()
-  else if base == 11 and shift
+  case base == 11 and shift
     deleteLines()
-  else if base == 12 # Ctrl+L: the line, and the next with each again
+  case base == 12 # Ctrl+L: the line, and the next with each again
     l := lineOf(cursor)
     if cursor != anchor and lineAt[lineOf(selEnd())] == selEnd() # (whole lines already: one more)
       l = lineOf(selEnd())
@@ -1080,22 +1080,22 @@ key :: proc(k: Int)
     else
       cursor = textLen
     end
-  else if base == 19
+  case base == 19
     if name.len() == 0
       startPrompt(SAVE_AS)
     else
       ok := save()
     end
-  else if base == 18 # Ctrl+R: save, then run it
+  case base == 18 # Ctrl+R: save, then run it
     if name.len() == 0
       runAfter = true
       startPrompt(SAVE_AS)
-    else if save()
+    case save()
       pc.launch(name[0:name.len()].asString())
     end
-  else if base == 15
+  case base == 15
     startOpen()
-  else if base == 14 # Ctrl+N
+  case base == 14 # Ctrl+N
     if modified() and confirm != 14
       say("Unsaved changes: Ctrl+N again drops them", ORANGE)
       confirm = 14
@@ -1105,13 +1105,13 @@ key :: proc(k: Int)
       name.clear()
       say("New: Ctrl+S names and saves it", GRAY)
     end
-  else if base == 6
+  case base == 6
     if cursor != anchor and selEnd() - selStart() <= 48 # (what's selected, to find)
       query.clear()
       query.pushAll(text[selStart():selEnd()])
     end
     startPrompt(FIND)
-  else if base == 7
+  case base == 7
     startPrompt(GO_TO)
   end
 end
@@ -1199,20 +1199,20 @@ drawLine :: proc(l: Int, y: Int)
       c := text[p]
       if inComment
         color = LAVENDER
-      else if inString > 0
+      case inString > 0
         color = GREEN
         if c == inString and text[p - 1] != 92
           inString = 0
         end
-      else if p < wordEnd
+      case p < wordEnd
         color = wordColor
-      else if c == 35
+      case c == 35
         inComment = true
         color = LAVENDER
-      else if c == 34 or c == 39
+      case c == 34 or c == 39
         inString = c
         color = GREEN
-      else if isWord(c)
+      case isWord(c)
         q := p
         for q < e and isWord(text[q])
           q += 1
@@ -1221,11 +1221,11 @@ drawLine :: proc(l: Int, y: Int)
         wordColor = WHITE
         if c >= 48 and c <= 57
           wordColor = ORANGE
-        else if isKeyword(p, q)
+        case isKeyword(p, q)
           wordColor = PINK
-        else if c >= 65 and c <= 90
+        case c >= 65 and c <= 90
           wordColor = PEACH
-        else if q < e and text[q] == 40
+        case q < e and text[q] == 40
           wordColor = BLUE
         end
         color = wordColor
@@ -1318,7 +1318,7 @@ draw* :: proc()
     label := "Save as: "
     if mode == GO_TO
       label = "Go to line: "
-    else if mode == FIND
+    case mode == FIND
       label = "Find (Enter: next): "
     end
     pc.print(label, 2, 231, YELLOW)
@@ -1328,7 +1328,7 @@ draw* :: proc()
     end
     pc.print(t.asString(), 2 + label.len() * 6, 231, WHITE)
     pc.rect(2 + (label.len() + t.len()) * 6, 230, 1, 9, YELLOW)
-  else if message.len() > 0 and pc.time() - messageAt < 4.0
+  case message.len() > 0 and pc.time() - messageAt < 4.0
     pc.print(message[0:message.len()].asString(), 2, 231, messageColor)
   else
     pc.print("^O open  ^S save  ^R run  ^F find  Sys+Esc home", 2, 231, DIM)
@@ -1349,9 +1349,9 @@ for i in 0..<max(lastLen, 0)
   c := lastBuf[i]
   if c == 32 and part < 2
     part += 1
-  else if part == 0
+  case part == 0
     place[0] += 1
-  else if c >= 48 and c <= 57
+  case c >= 48 and c <= 57
     place[part] = place[part] * 10 + c - 48
   end
 end

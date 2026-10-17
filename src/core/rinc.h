@@ -69,6 +69,18 @@ static inline const uint8_t *rinc_shownRow(int y) {
 /* one frame of a game: the app's update* and then draw* (each optional). 0: ran, 1: the app has
    neither (it isn't a game), -1: a runtime error (rio_error says) */
 int rinc_frame(rio_Vm *vm);
+/* starting an app, the same on every Rinc: rinc_appBegin (0, or -1), then the platform reads its source
+   (into the top of the app space, where it compiles) or finds its image, then rinc_appRun (0: running, or
+   done; -1). rinc_appFail is a reason it can't start (name, then why). What goes wrong goes on the screen
+   (rinc_say: and to put), with the way home. Each frame after, rinc_gameFrame: a game's frame, and its
+   error on the screen if it fails (0: ran, 1 nothing running, -1 it failed) */
+extern int rinc_game;    /* the app has frames to run (update*, draw*) */
+extern int rinc_showLog; /* what's logged goes on the screen too: while an app starts, and once it's stopped */
+int rinc_appBegin(rio_Vm *vm, void *space, uint32_t size, const char *name, void (*put)(const char *s, int n));
+int rinc_appRun(rio_Vm *vm, void *space, uint32_t size, const char *name, const char *src, uint32_t len, const void *image);
+void rinc_appFail(const char *name, const char *why);
+void rinc_say(const char *s);
+int rinc_gameFrame(rio_Vm *vm);
 
 /* sound (audio.c): rinc_VOICES voices mixed to rinc_RATE frames a second of 16-bit stereo. Host procs,
    in pc: sound(voice, data, bits, channels, rate), soundRate(voice, rate), soundVolume(voice, 0..1),

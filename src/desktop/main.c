@@ -19,6 +19,9 @@ __declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(void *module, c
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #endif
+#ifndef rinc_SDL
+#define rinc_SDL 0
+#endif
 #if rinc_SDL
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -286,27 +289,20 @@ const char *rinc_storageStart(const char *name);
 const char *rinc_storageAt(const char *dir);
 void rinc_mkdirsFor(const char *file);
 
-/* an app by name: from storage, or else the bundle; compiled (or, an image, loaded) and started. 0,
-   with *game saying whether it has frames; -1: not (said why) */
-static int rinc_openApp(const char *name, int *game) {
-  const rinc_App *b = 0; int n, fn, bad;
+/* an app, by name, started as on every Rinc (rinc_appBegin, rinc_appRun): from storage, else the
+   bundle. What goes wrong is on the screen (and printed): 0, or -1 */
+static int rinc_openApp(const char *name) {
+  const rinc_App *b = 0; int n;
   name = rinc_appFor(name); /* (home: storage's, else the bundle's) */
+  if (rinc_appBegin(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, name, rinc_put)) return -1;
   n = rinc_readApp(name, rinc_src, sizeof rinc_src);
-  if (n == -2) { fprintf(stderr, "%s.rio: too big\n", name); return -1; }
-  if (n < 0 && !(b = rinc_bundled(name))) { fprintf(stderr, "rinc: no app named %s (rinc -install %s, if it's a standard one)\n", name, name); return -1; }
-  rinc_audioReset();
-  rinc_setAppName(name);
-  if (rinc_start(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, rinc_put)) return -1;
-  if (b && b->image) bad = rio_loadImage(&rinc_vm, b->data, b->len);
-  else bad = rinc_compile(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, b ? b->data : rinc_src, b ? (uint32_t)(b->len ? b->len : strlen(b->data)) : (uint32_t)n);
-  if (bad || rio_run(&rinc_vm) || ((fn = rio_findProc(&rinc_vm, "main")) >= 0 && rio_call(&rinc_vm, fn))) {
-    fflush(stdout); fprintf(stderr, "%s.rio:%s\n", name, rio_error(&rinc_vm)); return -1;
-  }
-  *game = rio_findProc(&rinc_vm, "update") >= 0 || rio_findProc(&rinc_vm, "draw") >= 0;
-  return 0;
+  if (n == -2) { rinc_appFail(name, ".rio: too big (64 KB is the most)"); return -1; }
+  if (n < 0 && !(b = rinc_bundled(name))) { rinc_appFail(name, ": no app of this name (rinc -install it, if it's a standard one)"); return -1; }
+  if (!b) return rinc_appRun(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, name, rinc_src, (uint32_t)n, 0);
+  return rinc_appRun(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, name, b->data, b->len ? b->len : (uint32_t)strlen(b->data), b->image ? b->data : 0);
 }
 /* pc.launch, or the system key: to rinc_launchName */
-static int rinc_switch(int *game) { rinc_launch = 0; return rinc_openApp(rinc_launchName, game); }
+static void rinc_switch(void) { rinc_launch = 0; rinc_openApp(rinc_launchName); }
 
 /* -install: standard apps (home, console, the demos), by name, fetched with curl from the Rinc
    repository's main branch; or app files (name.rio) copied. Into storage. 0, or 1 (said why) */
@@ -392,7 +388,7 @@ static void rinc_sdlKey(const SDL_KeyboardEvent *k) {
 
 /* the screen in a window, scaled up by whole steps; a game gets a frame every 1/60 s */
 static int rinc_window(const char *title) {
-  SDL_Window *w; SDL_Renderer *r; SDL_Texture *tex; uint64_t next; int game = 1, running = 1;
+  SDL_Window *w; SDL_Renderer *r; SDL_Texture *tex; uint64_t next; int running = 1;
   SDL_AudioSpec spec;
   if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) { fprintf(stderr, "rinc: %s\n", SDL_GetError()); return 1; }
   spec.format = SDL_AUDIO_S16; spec.channels = 2; spec.freq = rinc_RATE;
@@ -430,19 +426,15 @@ static int rinc_window(const char *title) {
         strcpy(rinc_launchName, "home"); rinc_launch = 1;
       }
     }
-    while (game && SDL_GetTicksNS() >= next) { /* 60 frames a second, whatever the display's rate */
-      int res;
+    while (rinc_game && SDL_GetTicksNS() >= next) { /* 60 frames a second, whatever the display's rate */
       rinc_typeMore();
-      res = rinc_frame(&rinc_vm);
-      if (res) { game = 0; if (res < 0) { fprintf(stderr, "%s\n", rio_error(&rinc_vm)); running = 0; } }
+      rinc_gameFrame(&rinc_vm); /* (an error goes on the screen, as on every Rinc) */
       if (rinc_launch) break;
       next += 1000000000ull / 60;
       if (SDL_GetTicksNS() > next + 100000000ull) next = SDL_GetTicksNS(); /* (fell far behind: skip ahead) */
     }
-    if (rinc_launch) { /* pc.launch, or the system key (a failed switch leaves what was running) */
-      int was = game;
-      if (rinc_switch(&game)) game = was;
-      else running = 1;
+    if (rinc_launch) { /* pc.launch, or the system key */
+      rinc_switch();
       next = SDL_GetTicksNS();
     }
     if (SDL_LockTexture(tex, 0, (void **)&px, &pitch)) {
@@ -453,7 +445,7 @@ static int rinc_window(const char *title) {
     SDL_RenderClear(r);
     SDL_RenderTexture(r, tex, 0, 0);
     SDL_RenderPresent(r);
-    if (!game) SDL_Delay(16);
+    if (!rinc_game) SDL_Delay(16);
   }
   SDL_Quit();
   return 0;
@@ -463,7 +455,7 @@ static int rinc_window(const char *title) {
 extern const char rinc_help[], rinc_license[]; /* (about.c) */
 int main(int argc, char **argv) {
   const char *apps[rinc_BUNDLE_MOST], *out = 0, *img = 0, *wavout = 0, *exp = 0, *web = 0, *runner = 0, *named = 0, *data = 0, *root = 0, *home = 0, *storage = 0, *app = 0;
-  const char *installs[32]; int napps = 0, ninstall = 0, i, fn, frames = 0, game = 0, memReport = 0, opened = 0; uint32_t size = 0;
+  const char *installs[32]; int napps = 0, ninstall = 0, i, frames = 0, memReport = 0, opened = 0, windowed; uint32_t size = 0;
   char stem[40], *self = 0;
   for (i = 1; i < argc; i++) { /* (these on their own) */
     if (!strcmp(argv[i], "-help") || !strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) return fputs(rinc_help, stdout) < 0;
@@ -495,6 +487,7 @@ int main(int argc, char **argv) {
     else apps[napps++] = argv[i];
   }
   rinc_t0 = clock(); rinc_time = rinc_now;
+  windowed = rinc_SDL && !out && !frames; /* (a window shows what goes wrong; without one, it ends rinc) */
   if (exp || web) { /* a bundle of the apps, as a program or a page */
     if (!napps) { fprintf(stderr, "rinc: -export and -web take the apps to bundle: rinc a.rio b.rio -export game\n"); return 2; }
     rinc_storageStart("rinc");
@@ -518,8 +511,9 @@ int main(int argc, char **argv) {
   }
   if (rinc_start(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, rinc_put)) { fprintf(stderr, "rinc: can't start\n"); return 1; }
   if (!app && !named && (rinc_readApp("home", 0, 0) != -1 || rinc_bundled(rinc_appFor("home")))) named = "home"; /* (plain rinc: home, if it's installed) */
-  if (named) {
-    if (app || rinc_openApp(named, &game)) return 2;
+  if (named) { /* (a failure to start: on the screen in a window, else the end) */
+    if (app) { fprintf(stderr, "rinc: an app's file, or -app, not both\n"); return 2; }
+    if (rinc_openApp(named) && !windowed) return 1;
     app = named;
     opened = 1;
   }
@@ -534,16 +528,15 @@ int main(int argc, char **argv) {
         if (!(size = rinc_makeImage(app, n, 1))) return 1;
         return rinc_writeFile(img, rinc_image, size, 0, 0, 0, 0);
       }
-      if (rinc_compileApp(app, n)) return 1;
       if (memReport) { /* -m: how near its limits it came, compiling and running, as on every Rinc */
         static char text[1024];
+        if (rinc_compileApp(app, n)) return 1;
         rio_usageText(&rinc_usage, text, sizeof text);
         printf("%s: fits in the 256 KB app space\n%s", app, text);
         return 0;
       }
-      if (rio_run(&rinc_vm) || ((fn = rio_findProc(&rinc_vm, "main")) >= 0 && rio_call(&rinc_vm, fn))) {
-        fflush(stdout); fprintf(stderr, "%s:%s\n", app, rio_error(&rinc_vm)); return 1;
-      }
+      if ((rinc_appBegin(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, stem, rinc_put) ||
+           rinc_appRun(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, stem, rinc_src, (uint32_t)n, 0)) && !windowed) return 1;
     }
 #if rinc_SDL
     if (!out && !frames) return rinc_window(app);
@@ -551,8 +544,8 @@ int main(int argc, char **argv) {
     for (i = 0; i < frames; i++) { /* a game, without a window: A held for the first frames (to start it) */
       rinc_buttons = i < 3 ? rinc_Button_a : 0;
       rinc_typeMore();
-      if (rinc_frame(&rinc_vm) < 0) { fflush(stdout); fprintf(stderr, "%s:%s\n", app, rio_error(&rinc_vm)); return 1; }
-      if (rinc_launch && rinc_switch(&game)) return 1;
+      if (rinc_gameFrame(&rinc_vm) < 0) return 1; /* (it said why) */
+      if (rinc_launch) rinc_switch();
       if (wavout && i < 60 * 60) rinc_audioMix(rinc_wav + i * (rinc_RATE / 60) * 2, rinc_RATE / 60); /* (a frame's worth of sound) */
     }
     if (wavout && rinc_saveWav(wavout, (uint32_t)(frames < 3600 ? frames : 3600) * (rinc_RATE / 60))) { fprintf(stderr, "rinc: can't write %s\n", wavout); return 1; }

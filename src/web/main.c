@@ -58,50 +58,41 @@ static const rinc_Fs rinc_webFs = {rinc_open, rinc_read, rinc_write, rinc_close,
 
 rinc_EXPORT(source) char *rinc_webSource(void) { return rinc_src; }
 rinc_EXPORT(sourceCap) int rinc_webSourceCap(void) { return (int)sizeof rinc_src; }
-/* an app, by name, started: from storage (with the compiler), else the bundle: an image (or, with the
-   compiler, a source too). 0, or -1 */
-static int rinc_webOpen(const char *name) {
-  const rinc_App *b = 0; int fn, n = -1; const char *src; uint32_t len;
+/* an app, by name, started (rinc_appBegin, rinc_appRun): from storage (with the compiler), else the
+   bundle: an image (or, with the compiler, a source too). Whatever goes wrong is on the screen */
+static void rinc_webOpen(const char *name) {
+  const rinc_App *b = 0; int n = -1; char *top = (char *)rinc_appSpace + sizeof rinc_appSpace - rinc_MAX_SOURCE;
   name = rinc_appFor(name);
-  if (rinc_start(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, rinc_put)) return -1;
+  if (rinc_appBegin(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, name, rinc_put)) return;
 #ifndef rio_NO_COMPILER
-  n = rinc_readApp(name, (char *)rinc_appSpace + sizeof rinc_appSpace - rinc_MAX_SOURCE, rinc_MAX_SOURCE); /* (at the top, where it compiles) */
+  n = rinc_readApp(name, top, rinc_MAX_SOURCE); /* (at the top, where it compiles) */
 #endif
-  if (n < 0 && !(b = rinc_bundled(name))) return -1;
-  rinc_setAppName(name);
-  if (n >= 0) { src = (const char *)rinc_appSpace + sizeof rinc_appSpace - rinc_MAX_SOURCE; len = (uint32_t)n; }
-  else if (b->image) {
-    if (rio_loadImage(&rinc_vm, b->data, b->len) || rio_run(&rinc_vm)) return -1;
-    return (fn = rio_findProc(&rinc_vm, "main")) >= 0 ? rio_call(&rinc_vm, fn) : 0;
-  } else { src = b->data; len = b->len; }
-#ifdef rio_NO_COMPILER
-  (void)src; (void)len;
-  return -1;
-#else
-  if (rinc_compile(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, src, len) || rio_run(&rinc_vm)) return -1;
-  return (fn = rio_findProc(&rinc_vm, "main")) >= 0 ? rio_call(&rinc_vm, fn) : 0;
-#endif
+  if (n == -2) { rinc_appFail(name, ".rio: too big (64 KB is the most)"); return; }
+  if (n < 0 && !(b = rinc_bundled(name))) { rinc_appFail(name, ": no app of this name"); return; }
+  if (n >= 0) rinc_appRun(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, name, top, (uint32_t)n, 0);
+  else rinc_appRun(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, name, b->data, b->len, b->image ? b->data : 0);
 }
-/* start the bundle in source() at its home app: 0, or -1 (error() says why) */
+/* start the bundle in source() at its home app: 0, or -1 if it's no bundle (error() says why) */
 rinc_EXPORT(start) int rinc_webStart(int len) {
   rinc_time = js_now;
   if (rinc_bundleRead(rinc_src, (uint32_t)len)) return -1;
   if (*rinc_bundleName()) snprintf(rinc_store, sizeof rinc_store, "%s", rinc_bundleName());
   rinc_fs = &rinc_webFs;
-  return rinc_webOpen("home");
+  rinc_webOpen("home");
+  return 0;
 }
 /* a frame with these buttons held (keys, for the system key: 1 Shift, 2 another key, 4 Esc or a
-   controller's Back, 8 its guide button): 0, 1 (not a game), -1 (an error); then any switch, to an app
-   or (Sys+Esc) home */
+   controller's Back, 8 its guide button): 0 a game's frame ran, 1 nothing's running (the page keeps
+   calling, for the system key). An app's error goes on the screen; then any switch, to an app or
+   (Sys+Esc) home */
 rinc_EXPORT(frame) int rinc_webFrame(int buttons, int keys) {
-  int res = 0;
   if (rinc_systemKey(keys & 8, keys & 1, keys & 2, keys & 4)) { strcpy(rinc_launchName, "home"); rinc_launch = 1; }
   else {
     rinc_buttons = (uint16_t)buttons;
-    res = rinc_frame(&rinc_vm);
+    rinc_gameFrame(&rinc_vm);
   }
-  if (rinc_launch) { rinc_launch = 0; return rinc_webOpen(rinc_launchName) < 0 ? -1 : 0; }
-  return res;
+  if (rinc_launch) { rinc_launch = 0; rinc_webOpen(rinc_launchName); }
+  return !rinc_game;
 }
 rinc_EXPORT(error) const char *rinc_webError(void) { return rio_error(&rinc_vm); }
 /* a character typed, and an editing key (rinc_Key_*, Ctrl+letter), for key(): not while the system key

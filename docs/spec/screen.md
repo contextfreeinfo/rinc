@@ -2,7 +2,8 @@
 
 The screen is 320 pixels wide and 240 high, `x` from the left and `y` from the top. Each pixel holds a
 color number, 0 to 255. A Rinc shows it at any whole-number scale (the Fruit Jam's HDMI output is
-640x480, each pixel 2x2).
+640x480, each pixel 2x2). An app starts with the screen all color 1, dark blue: Rinc's text screen,
+where what it logs shows until it draws, and where Rinc shows what went wrong if it fails.
 
 ## Drawing
 

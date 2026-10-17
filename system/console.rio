@@ -212,7 +212,7 @@ load :: proc(name: String)
   showLog()
   if r < 0
     showError()
-  else if r == 1
+  case r == 1
     say("(it ends unfinished)", RED)
   else
     msg.format("loaded ", name)
@@ -269,11 +269,11 @@ command :: proc(t: String) -> Bool
   name := trim(t[w:])
   if word == "load"
     load(name)
-  else if word == "run"
+  case word == "run"
     pc.launch(name)                      # an app runs as itself, in all of its memory
-  else if word == "save"
+  case word == "save"
     startSave(name)
-  else if word == "delete"
+  case word == "delete"
     if pc.appDelete(name) == 0
       msg.format("deleted ", name)
       say(msg[:].asString(), GRAY)
@@ -313,9 +313,9 @@ enter :: proc()
       say("(unfinished input dropped)", GRAY)
       acc.clear()
     end
-  else if acc.len() == 0 and command(trim(text))
+  case acc.len() == 0 and command(trim(text))
     acc.clear()
-  else if not (acc.pushAll(text) and acc.push(10))
+  case not (acc.pushAll(text) and acc.push(10))
     say("(input too long)", RED)
     acc.clear()
   else
@@ -340,35 +340,35 @@ end
 typing :: proc(c: Int)
   if c == 13
     enter()
-  else if c == 8
+  case c == 8
     if cur > 0
       line.remove(cur - 1)
       cur -= 1
     end
-  else if c == 134                       # Delete
+  case c == 134                       # Delete
     if cur < line.len()
       line.remove(cur)
     end
-  else if c == 128
+  case c == 128
     cur = max(cur - 1, 0)
-  else if c == 129
+  case c == 129
     cur = min(cur + 1, line.len())
-  else if c == 132 or c == 1             # Home, Ctrl-A
+  case c == 132 or c == 1             # Home, Ctrl-A
     cur = 0
-  else if c == 133 or c == 5             # End, Ctrl-E
+  case c == 133 or c == 5             # End, Ctrl-E
     cur = line.len()
-  else if c == 130
+  case c == 130
     recall(1)
-  else if c == 131
+  case c == 131
     recall(-1)
-  else if c == 3                         # Ctrl-C: drop what's typed
+  case c == 3                         # Ctrl-C: drop what's typed
     say("^C", GRAY)
     acc.clear()
     setLine("")
-  else if c == 9
+  case c == 9
     insert(32)
     insert(32)
-  else if c >= 32 and c < 127
+  case c >= 32 and c < 127
     insert(c)
   end
 end
@@ -380,11 +380,11 @@ saving :: proc(c: Int)
     end
     setLine("")
     finishSave()
-  else if c == 3
+  case c == 3
     setLine("")
     mode = .typing
     say("gave up", GRAY)
-  else if c == 13 or c == 9 or (c >= 32 and c < 127)
+  case c == 13 or c == 9 or (c >= 32 and c < 127)
     if fileLen == file.len()
       setLine("")
       mode = .typing

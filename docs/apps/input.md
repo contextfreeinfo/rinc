@@ -50,7 +50,7 @@ update* :: proc()
     end
     if c == 8 and name.len() > 0
       name.pop()
-    else if c >= 32
+    case c >= 32
       name.push(c)
     end
   end

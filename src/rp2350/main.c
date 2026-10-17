@@ -27,12 +27,8 @@ extern const uint8_t rinc_firmwareBundle[]; extern const uint32_t rinc_firmwareB
 static _Alignas(16) uint8_t rinc_appSpace[rinc_APP_SPACE];
 static _Alignas(8) uint8_t rinc_jitCode[16 << 10]; /* simple loops, compiled to machine code (SRAM runs code) */
 static rio_Vm rinc_vm;
-static int rinc_game;    /* the app has frames: update and draw, at each vertical blank */
-static int rinc_showLog; /* log goes on the screen too: while an app starts, and once it's done or failed */
-
-/* log output: to the serial port, and to the screen while no frames are drawing it */
-static void rinc_put(const char *s, int n) { fwrite(s, 1, (size_t)n, stdout); fflush(stdout); if (rinc_showLog) rinc_consolePut(s, n); }
-static void rinc_say(const char *s) { rinc_put(s, (int)strlen(s)); }
+/* log output: to the serial port (and, while an app starts and once it's stopped, the screen: rinc_say) */
+static void rinc_put(const char *s, int n) { fwrite(s, 1, (size_t)n, stdout); fflush(stdout); }
 #define rinc_DOWN(k) (rinc_keysDown[(k) >> 3] >> ((k) & 7) & 1)
 
 /* the system key (rinc_systemKey): the Windows key, a controller's Xbox button, or Shift tapped
@@ -46,46 +42,29 @@ static int rinc_homeKey(void) {
 }
 
 /* an app's source: from the SD card (read into the app space's top), or else the firmware's bundle.
-   Its length, or -1 */
+   Its length, or -1 (said why) */
 static int rinc_source(const char *name, const char **src) {
   char *at = (char *)rinc_appSpace + rinc_APP_SPACE - rinc_MAX_SOURCE; const rinc_App *b; int n = rinc_readApp(name, at, rinc_MAX_SOURCE);
-  if (n == -2) { rinc_say(name); rinc_say(".rio: too big (64 KB is the most)\r\n"); return -1; }
+  if (n == -2) { rinc_appFail(name, ".rio: too big (64 KB is the most)"); return -1; }
   if (n >= 0) {
     memmove(rinc_appSpace + rinc_APP_SPACE - n, at, (size_t)n); /* (right at the top: all below is the compiler's) */
     *src = (const char *)rinc_appSpace + rinc_APP_SPACE - n;
     return n;
   }
   if ((b = rinc_bundled(name))) { *src = b->data; return (int)(b->len ? b->len : strlen(b->data)); }
-  rinc_say("no app named "); rinc_say(name); rinc_say("\r\n");
+  rinc_appFail(name, ": no app of this name");
   return -1;
 }
 
-/* an app, by name, compiled whole and started: its top-level code, then main; then, if it's a game,
-   its frames. On failure (or for an app that isn't a game) its log and error stay on the screen */
+/* an app, by name, compiled whole and started (rinc_appBegin, rinc_appRun): its top-level code, then
+   main; then, if it's a game, its frames. What goes wrong stays on the screen */
 static void rinc_open(const char *name) {
+  const char *src; int n;
   name = rinc_appFor(name); /* (home: the card's, else the bundle's) */
-  const char *src; int n, fn, res; rio_Usage usage;
-  rinc_game = 0; rinc_showLog = 1;
-  rinc_audioReset(); rinc_consoleClear(1);
-  if (rinc_start(&rinc_vm, rinc_appSpace, rinc_APP_SPACE, rinc_put) || rio_jit(&rinc_vm, rinc_jitCode, sizeof rinc_jitCode) < 0) { rinc_say("can't start rio\r\n"); return; }
+  if (rinc_appBegin(&rinc_vm, rinc_appSpace, rinc_APP_SPACE, name, rinc_put)) return;
+  if (rio_jit(&rinc_vm, rinc_jitCode, sizeof rinc_jitCode) < 0) { rinc_appFail(name, ": can't set up native code"); return; }
   if ((n = rinc_source(name, &src)) < 0) return;
-  rinc_setAppName(name);
-  rio_trackUsage(&rinc_vm, &usage);
-  if ((res = rinc_compile(&rinc_vm, rinc_appSpace, rinc_APP_SPACE, src, (uint32_t)n)) != 0) {
-    rinc_say(name); rinc_say(".rio:"); rinc_say(res > 0 ? " too big (64 KB is the most)" : rio_error(&rinc_vm)); rinc_say("\r\n");
-    if (res < 0 && rinc_atLimit(rio_error(&rinc_vm))) { /* (how near each limit it came) */
-      static char text[1024]; int k, m = rio_usageText(&usage, text, sizeof text);
-      for (k = 0; k < m; k++) rinc_put(text[k] == '\n' ? "\r\n" : text + k, text[k] == '\n' ? 2 : 1);
-    }
-    rinc_say("(Windows+Esc: back home)\r\n");
-    return;
-  }
-  if (rio_run(&rinc_vm) || ((fn = rio_findProc(&rinc_vm, "main")) >= 0 && rio_call(&rinc_vm, fn))) {
-    rinc_say(name); rinc_say(".rio:"); rinc_say(rio_error(&rinc_vm)); rinc_say("\r\n(Windows+Esc: back home)\r\n");
-    return;
-  }
-  if (rio_findProc(&rinc_vm, "update") >= 0 || rio_findProc(&rinc_vm, "draw") >= 0) { rinc_game = 1; rinc_showLog = 0; }
-  else rinc_say("\r\n(done; Windows+Esc: back home)\r\n");
+  rinc_appRun(&rinc_vm, rinc_appSpace, rinc_APP_SPACE, name, src, (uint32_t)n, 0);
 }
 
 /* typing, from the USB keyboard and the serial port, for pc.key(); Ctrl-C over serial (a developer's
@@ -112,7 +91,7 @@ static int rinc_type(void) {
 
 /* a frame, at each vertical blank, right after the screen was copied for showing */
 static void rinc_frameNow(void) {
-  static uint32_t last; static int wasConnected; int res, stop = 0, connected;
+  static uint32_t last; static int wasConnected; int stop = 0, connected;
   while (rinc_frames == last) { rinc_keyboardPoll(); stop |= rinc_type(); } /* (the USB host runs all the while) */
   last = rinc_frames;
   stop |= rinc_type();
@@ -126,12 +105,7 @@ static void rinc_frameNow(void) {
   rinc_buttons = rinc_padButtons | (uint16_t)(rinc_DOWN(HID_KEY_ARROW_LEFT) * rinc_Button_left | rinc_DOWN(HID_KEY_ARROW_RIGHT) * rinc_Button_right |
     rinc_DOWN(HID_KEY_ARROW_UP) * rinc_Button_up | rinc_DOWN(HID_KEY_ARROW_DOWN) * rinc_Button_down | rinc_DOWN(HID_KEY_V) * rinc_Button_a |
     rinc_DOWN(HID_KEY_C) * rinc_Button_b | rinc_DOWN(HID_KEY_X) * rinc_Button_x | rinc_DOWN(HID_KEY_Z) * rinc_Button_y);
-  res = rinc_frame(&rinc_vm);
-  if (res) { /* an error, or no update or draw any more */
-    rinc_game = 0; rinc_showLog = 1; rinc_audioReset(); rinc_consoleClear(1);
-    rinc_say(res < 0 ? rio_error(&rinc_vm) : "nothing to run: define update* or draw*");
-    rinc_say("\r\n(Windows+Esc: back home)\r\n");
-  }
+  rinc_gameFrame(&rinc_vm); /* (an error goes on the screen) */
   if (rinc_launch) { rinc_launch = 0; rinc_open(rinc_launchName); } /* (pc.launch: after the frame) */
 }
 

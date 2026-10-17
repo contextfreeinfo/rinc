@@ -147,4 +147,4 @@ the keys of most editors. It starts with the app it had last, where it was.
 | Ctrl+F, Ctrl+G | find (Enter: the next), go to a line |
 
 Enter keeps the line's indent, and a step more after a line that opens a block (`if`, `for`, a proc and
-so on); `end` and `else` step back out as they're typed.
+so on); `end`, `else` and `case` step back out as they're typed.
