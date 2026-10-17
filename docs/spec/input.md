@@ -1,6 +1,6 @@
 # Input
 
-A Rinc reads its keyboard and controller before each frame, and a cart sees the same values for the whole
+A Rinc reads its keyboard and controller before each frame, and an app sees the same values for the whole
 frame. A Rinc may have no controller, or (in principle) no keyboard; the procs then give 0 or -1.
 
 ## Buttons
@@ -19,7 +19,7 @@ frame. A Rinc may have no controller, or (in principle) no keyboard; the procs t
 | 12, 13 | Start, Back | | |
 
 The keyboard and the controller are both player 1: a button is held if either holds it. The face
-buttons are named and placed as on an Xbox controller, in order of importance, so a cart that needs
+buttons are named and placed as on an Xbox controller, in order of importance, so an app that needs
 one button uses A.
 
 ## Sticks and triggers
@@ -31,10 +31,24 @@ left one and 1 the right. Without a controller, or for another `i`, they're 0.
 
 ## Typed text
 
-`pc.key()` takes the next character typed from a queue, or gives -1 when it's empty. The queue holds
-printable ASCII (32 to 126), 13 for Enter, 8 for Backspace and 27 for Esc. Other keys (arrows, function
-keys) add nothing, and a Rinc drops what's typed beyond 63 characters waiting. Typing also holds buttons
-down as keys are held, so a cart reads keys either way.
+`pc.key()` takes the next key typed from a queue, or gives -1 when it's empty, for text and for editing
+it:
+
+| key | |
+|---|---|
+| 32 to 126 | printable ASCII, as typed |
+| 8, 9, 13, 27 | Backspace, Tab, Enter, Esc |
+| 1 to 26 | Ctrl with a letter: 1 for Ctrl-A, 3 for Ctrl-C and so on (Ctrl-H, Ctrl-I and Ctrl-M are 8, 9 and 13) |
+| 128, 129, 130, 131 | left, right, up, down |
+| 132, 133, 134 | Home, End, Delete |
+| 135, 136 | Page Up, Page Down |
+
+Other keys (function keys, the system key) add nothing. A Rinc drops what's typed beyond 63 keys waiting,
+and one fed text faster than that (a serial port, a paste) waits for room. Keys also hold buttons down
+while they're held (the arrows, V, C, X and Z), so an app reads them either way.
+
+A terminal's escape sequences (`ESC [ A` for up, `ESC [ 3 ~` for Delete, and so on) become the key codes
+above, so a Rinc fed by a serial terminal types the same keys.
 
 ## Time
 

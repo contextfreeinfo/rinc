@@ -2,11 +2,11 @@
 
 ## Tests
 
-`ctest` in a desktop build runs every cart headless, compares an exported game's screen with rinc's,
-checks [`pc.rio`](https://github.com/rincpc/rinc/blob/main/src/core/pc.rio) against the host procs Rinc
+`ctest` in a desktop build runs every app headless, runs home and the console (typing at it with
+`-type`), checks `rinc -m`, compares an exported game's screen with rinc's, checks [`pc.rio`](https://github.com/rincpc/rinc/blob/main/src/core/pc.rio) against the host procs Rinc
 registers, and runs every `rio` example in these docs with a headless rinc (`rinc main.rio -frames 2`),
 using the runner from Rio (`lib/rio/tests/docs.py`). The examples follow
-[Rio's conventions](https://contextfreeinfo.github.io/rio/spec/index.html#reading-the-examples): an
+[Rio's conventions](https://contextfreeinfo.github.io/rio/spec/language.html#reading-the-examples): an
 `output` block after one is its exact `log` output.
 
 ## Rio at the same time
@@ -30,4 +30,4 @@ whenever the ci workflow is run by hand (Actions > ci > Run workflow), they're p
 [nightly](https://github.com/rincpc/rinc/releases/tag/nightly) prerelease.
 
 `.github/workflows/pages.yml` makes the [demo site](https://rincpc.com/) on each push to `main`: a page
-for each cart, an index, and these docs under `/docs`.
+for each app, an index, and these docs under `/docs`.

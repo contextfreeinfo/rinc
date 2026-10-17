@@ -1,4 +1,4 @@
-# Hello: a first cart: stripes, a box, and the time
+# Hello: a first app: stripes, a box, and the time
 pc.cls(1)
 for y in 0..<240
   for x in 0..<320

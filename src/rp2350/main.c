@@ -1,15 +1,16 @@
-/* Rinc on the RP2350 (Adafruit Fruit Jam): for now, a rio REPL over USB serial. Video (DVI over HSTX,
-   the screen double-buffered by DMA at vblank), USB host input, SD and audio come next.
+/* Rinc on the RP2350 (Adafruit Fruit Jam): it runs one app at a time, starting at home. Every
+   app, home and the console included, is an app compiled whole into the app space
+   (docs/spec/running.md); the system key, or Ctrl-C over USB serial, switches.
 
    Memory, of the RP2350's 520 KB of SRAM:
-     app space            256 KB  (rio: the program's code and data; the compiler borrows it while
-                                   compiling. The REPL takes its top 32 KB for its compiler tables,
-                                   and a quarter of the rest for code, as code keeps coming)
+     app space            256 KB  (Rio: an app's code and data; an app's source, read from the SD card,
+                                   sits at its top while it compiles, where its data will be zero)
      screen               150 KB  (drawn into, and the copy being shown)
      native loops          16 KB  (rio_jit: loops compiled to Thumb-2)
      rio's interpreter     10 KB  (its loop runs from SRAM: see RINC_RIO_IN_RAM)
      USB, console, stacks  the rest */
 #include <stdio.h>
+#include <string.h>
 #include "pico/stdlib.h"
 #include "hardware/clocks.h"
 #include "rinc.h"
@@ -17,102 +18,130 @@
 #include "keyboard.h"
 #include "gamepad.h"
 void rinc_sdSetup(void); /* sd.c: the SD card, as rinc_fs */
-extern const char rinc_launcherSrc[]; extern const int rinc_launcherSrc_len; /* system/launcher.rio, built in */
 #include "rinc_audio.h"
 #include "tusb.h" /* (HID key codes) */
 
-#define rinc_APP_SPACE (256 << 10)    /* the app space */
-#define rinc_REPL_SCRATCH (32 << 10)  /* the REPL's compiler tables: the app space's top, while the REPL runs */
+#define rinc_APP_SPACE (256 << 10) /* the app space */
 
 static _Alignas(16) uint8_t rinc_appSpace[rinc_APP_SPACE];
 static _Alignas(8) uint8_t rinc_jitCode[16 << 10]; /* simple loops, compiled to machine code (SRAM runs code) */
 static rio_Vm rinc_vm;
-static rinc_Repl rinc_repl;
+static int rinc_game;    /* the app has frames: update and draw, at each vertical blank */
+static int rinc_showLog; /* log goes on the screen too: while an app starts, and once it's done or failed */
 
-/* output goes to the serial port, and to the screen unless a game has it */
-static void rinc_put(const char *s, int n) { fwrite(s, 1, (size_t)n, stdout); fflush(stdout); if (!rinc_repl.run) rinc_consolePut(s, n); }
+/* log output: to the serial port, and to the screen while no frames are drawing it */
+static void rinc_put(const char *s, int n) { fwrite(s, 1, (size_t)n, stdout); fflush(stdout); if (rinc_showLog) rinc_consolePut(s, n); }
+static void rinc_say(const char *s) { rinc_put(s, (int)strlen(s)); }
 #define rinc_DOWN(k) (rinc_keysDown[(k) >> 3] >> ((k) & 7) & 1)
 
-static int rinc_restart(void);
-/* home: the launcher, in a fresh session (the system's way out of anything) */
-static void rinc_home(void) {
+/* the system key (rinc_systemKey): the Windows key, a controller's Xbox button, or Shift tapped then
+   held. 1 when it's let go on its own: home */
+static int rinc_homeKey(void) {
+  int k, other = rinc_padButtons != 0;
+  for (k = 0; k < 32; k++) other |= k == (0xE0 >> 3) ? rinc_keysDown[k] & ~0xAA : rinc_keysDown[k]; /* (all but Shift and GUI: E1 E3 E5 E7) */
+  return rinc_systemKey(rinc_DOWN(HID_KEY_GUI_LEFT) || rinc_DOWN(HID_KEY_GUI_RIGHT) || rinc_padGuide,
+                        rinc_DOWN(HID_KEY_SHIFT_LEFT) || rinc_DOWN(HID_KEY_SHIFT_RIGHT), other);
+}
+
+/* an app's source: built in, or read from the SD card into the app space's top. Its length, or -1 */
+static int rinc_source(const char *name, const char **src) {
+  char path[96]; uint8_t *at = rinc_appSpace + rinc_APP_SPACE - rinc_MAX_SOURCE; int n = 0, got;
+  if ((*src = rinc_builtinApp(name, &n))) return n;
+  snprintf(path, sizeof path, "/rinc/apps/%s/%s.rio", name, name);
+  if (!rinc_fs || rinc_fs->open(path, 0)) { rinc_say("can't open "); rinc_say(path); rinc_say("\r\n"); return -1; }
+  while (n < rinc_MAX_SOURCE && (got = rinc_fs->read((char *)at + n, rinc_MAX_SOURCE - n)) > 0) n += got;
+  rinc_fs->close();
+  if (n >= rinc_MAX_SOURCE) { rinc_say(path); rinc_say(": too big (64 KB is the most)\r\n"); return -1; }
+  memmove(rinc_appSpace + rinc_APP_SPACE - n, at, (size_t)n); /* (right at the top: all below is the compiler's) */
+  *src = (const char *)rinc_appSpace + rinc_APP_SPACE - n;
+  return n;
+}
+
+/* an app, by name, compiled whole and started: its top-level code, then main; then, if it's a game,
+   its frames. On failure (or for an app that isn't a game) its log and error stay on the screen */
+static void rinc_open(const char *name) {
+  const char *src; int n, fn, res; rio_Usage usage;
+  rinc_game = 0; rinc_showLog = 1;
   rinc_audioReset(); rinc_consoleClear(1);
-  if (rinc_replSource(&rinc_repl, rinc_launcherSrc, rinc_launcherSrc_len)) rinc_replStop(&rinc_repl, "the launcher didn't start");
-}
-static int rinc_systemKey(void) { /* the Windows key, or a controller's Xbox button: pressed just now */
-  static int was; int now = rinc_DOWN(HID_KEY_GUI_LEFT) || rinc_DOWN(HID_KEY_GUI_RIGHT) || rinc_padGuide, pressed = now && !was;
-  was = now;
-  return pressed;
-}
-/* a game: a frame at each vertical blank, right after the screen was copied for showing */
-static void rinc_gameFrame(void) {
-  static uint32_t last; int res;
-  while (rinc_frames == last) { /* (typing goes to key(); editing keys, sent as ESC [ ..., are buttons instead) */
-    int c = rinc_keyboardChar();
-    if (c == 27) { /* (Esc itself, for the app; or the start of an editing key's escape, which isn't typing) */
-      c = rinc_keyboardChar();
-      if (c != '[') { rinc_textEsc(); if (c >= 0) rinc_textPush(c); continue; }
-      do c = rinc_keyboardChar(); while (c >= 0 && !((c >= 'A' && c <= 'Z') || c == '~'));
-      continue;
+  if (rinc_start(&rinc_vm, rinc_appSpace, rinc_APP_SPACE, rinc_put) || rio_jit(&rinc_vm, rinc_jitCode, sizeof rinc_jitCode) < 0) { rinc_say("can't start rio\r\n"); return; }
+  if ((n = rinc_source(name, &src)) < 0) return;
+  rio_trackUsage(&rinc_vm, &usage);
+  if ((res = rinc_compile(&rinc_vm, rinc_appSpace, rinc_APP_SPACE, src, (uint32_t)n)) != 0) {
+    rinc_say(name); rinc_say(".rio:"); rinc_say(res > 0 ? " too big (64 KB is the most)" : rio_error(&rinc_vm)); rinc_say("\r\n");
+    if (res < 0 && rinc_atLimit(rio_error(&rinc_vm))) { /* (how near each limit it came) */
+      static char text[1024]; int k, m = rio_usageText(&usage, text, sizeof text);
+      for (k = 0; k < m; k++) rinc_put(text[k] == '\n' ? "\r\n" : text + k, text[k] == '\n' ? 2 : 1);
     }
-    if (c >= 0) rinc_textPush(c); /* (Ctrl+C is the app's too: copy, someday) */
+    rinc_say("(the Windows key: back home)\r\n");
+    return;
   }
+  if (rio_run(&rinc_vm) || ((fn = rio_findProc(&rinc_vm, "main")) >= 0 && rio_call(&rinc_vm, fn))) {
+    rinc_say(name); rinc_say(".rio:"); rinc_say(rio_error(&rinc_vm)); rinc_say("\r\n(the Windows key: back home)\r\n");
+    return;
+  }
+  if (rio_findProc(&rinc_vm, "update") >= 0 || rio_findProc(&rinc_vm, "draw") >= 0) { rinc_game = 1; rinc_showLog = 0; }
+  else rinc_say("\r\n(done; the Windows key: back home)\r\n");
+}
+
+/* typing, from the USB keyboard and the serial port, for pc.key(); Ctrl-C over serial (a developer's
+   tools, such as send.py; not the keyboard's) opens the console, in place of whatever's running */
+static int rinc_type(void) {
+  int c;
+  while (rinc_textRoom() > 8 && (c = rinc_keyboardChar()) >= 0) {
+    if (c == 27) { /* (Esc itself, or the start of an editing key's escape: ESC [ ...) */
+      int d = rinc_keyboardChar();
+      if (d == '[') { rinc_textPush(27); rinc_textPush('['); continue; }
+      rinc_textEsc();
+      c = d;
+      if (c < 0) continue;
+    }
+    rinc_textPush(c);
+  }
+  while (rinc_textRoom() > 8 && (c = getchar_timeout_us(0)) != PICO_ERROR_TIMEOUT) {
+    if (c == 3) return 1;
+    rinc_textPush(c);
+  }
+  return 0;
+}
+
+/* a frame, at each vertical blank, right after the screen was copied for showing */
+static void rinc_frameNow(void) {
+  static uint32_t last; static int wasConnected; int res, stop = 0, connected;
+  while (rinc_frames == last) { rinc_keyboardPoll(); stop |= rinc_type(); } /* (the USB host runs all the while) */
   last = rinc_frames;
-  while ((res = getchar_timeout_us(0)) != PICO_ERROR_TIMEOUT && res != 3) rinc_textPush(res); /* (serial typing too) */
+  stop |= rinc_type();
+  if ((connected = stdio_usb_connected()) && !wasConnected) printf("%s", rinc_keyboardEvents()); /* (a terminal arrived: what's plugged in) */
+  wasConnected = connected;
   rinc_padRead();
-  if (res == 3) { /* Ctrl-C over serial (a developer's tools, such as send.py; not the keyboard's): stop, into the console, with what was running still there */
-    rinc_audioReset(); rinc_consoleClear(1); rinc_replStop(&rinc_repl, "stopped"); return;
-  }
-  if (rinc_systemKey()) { /* home: the Windows key, or a controller's Xbox button (Esc is the app's) */ /* home: the system key, or (for now) Esc, on the keyboard or over serial */
-    rinc_home(); return;
-  }
+  if (stop) { strcpy(rinc_launchName, "console"); rinc_launch = 1; }
+  if (rinc_homeKey()) { strcpy(rinc_launchName, "home"); rinc_launch = 1; } /* (the one key no app gets) */
+  if (rinc_launch) { rinc_launch = 0; rinc_open(rinc_launchName); return; }
+  if (!rinc_game) return;
   rinc_buttons = rinc_padButtons | (uint16_t)(rinc_DOWN(HID_KEY_ARROW_LEFT) * rinc_Button_left | rinc_DOWN(HID_KEY_ARROW_RIGHT) * rinc_Button_right |
     rinc_DOWN(HID_KEY_ARROW_UP) * rinc_Button_up | rinc_DOWN(HID_KEY_ARROW_DOWN) * rinc_Button_down | rinc_DOWN(HID_KEY_V) * rinc_Button_a |
     rinc_DOWN(HID_KEY_C) * rinc_Button_b | rinc_DOWN(HID_KEY_X) * rinc_Button_x | rinc_DOWN(HID_KEY_Z) * rinc_Button_y);
   res = rinc_frame(&rinc_vm);
-  if (res) { rinc_repl.run = 0; rinc_replStop(&rinc_repl, res > 0 ? "nothing to run: define update* or draw*" : rio_error(&rinc_vm)); }
-  if (rinc_launch) { /* the launcher chose */
-    int which = rinc_launch; rinc_launch = 0;
-    rinc_audioReset(); rinc_consoleClear(1);
-    if (which == 1 && rinc_replApp(&rinc_repl, rinc_launchName, 1)) { rinc_consolePut("\r\n(Windows key: back to the launcher)\r\n", 39); rinc_replStop(&rinc_repl, 0); }
-    if (which == 2) { rinc_repl.run = 0; if (!rinc_restart()) rinc_consolePut("Console: rio, typed and run. The Windows key goes back.\r\n", 56); rinc_replStop(&rinc_repl, 0); }
+  if (res) { /* an error, or no update or draw any more */
+    rinc_game = 0; rinc_showLog = 1; rinc_audioReset(); rinc_consoleClear(1);
+    rinc_say(res < 0 ? rio_error(&rinc_vm) : "nothing to run: define update* or draw*");
+    rinc_say("\r\n(the Windows key: back home)\r\n");
   }
-}
-static float rinc_now(void) { return (float)((double)time_us_64() / 1e6); }
-/* a fresh session, for the REPL's load: the app space as at the start */
-static int rinc_restart(void) {
-  return rinc_start(&rinc_vm, rinc_appSpace, rinc_APP_SPACE - rinc_REPL_SCRATCH, rinc_put) || rio_jit(&rinc_vm, rinc_jitCode, sizeof rinc_jitCode) < 0 ||
-         rio_replBegin(&rinc_vm, rinc_appSpace + rinc_APP_SPACE - rinc_REPL_SCRATCH, rinc_REPL_SCRATCH, 0);
+  if (rinc_launch) { rinc_launch = 0; rinc_open(rinc_launchName); } /* (pc.launch: after the frame) */
 }
 
+static float rinc_now(void) { return (float)((double)time_us_64() / 1e6); }
+
 int main(void) {
-  int ok;
   set_sys_clock_khz(252000, true); /* 10x the 25.2 MHz pixel clock of 640x480 DVI; fine at the default core voltage */
   rinc_keyboardSetup();
   stdio_init_all();
   rinc_time = rinc_now;
-  ok = !rinc_start(&rinc_vm, rinc_appSpace, rinc_APP_SPACE - rinc_REPL_SCRATCH, rinc_put) && rio_jit(&rinc_vm, rinc_jitCode, sizeof rinc_jitCode) >= 0;
   rinc_consoleClear(1);
   rinc_consolePut("Rinc\r\n\r\n", 8);
   rinc_audioSetup();
   rinc_videoStart(); /* (core 1: video, then sound) */
   rinc_keyboardStart();
   rinc_sdSetup();
-  if (!ok || rinc_replBegin(&rinc_repl, &rinc_vm, rinc_appSpace + rinc_APP_SPACE - rinc_REPL_SCRATCH, rinc_REPL_SCRATCH)) {
-    for (;;) { printf("rinc: can't start: %s\r\n", rio_error(&rinc_vm)); sleep_ms(1000); }
-  }
-  rinc_repl.restart = rinc_restart;
-  rinc_home(); /* (the board starts in the launcher) */
-  for (;;) { /* the REPL takes typing from a USB keyboard and from the USB serial port */
-    static int was_connected;
-    if (rinc_repl.run) { rinc_gameFrame(); continue; }
-    rinc_padRead();
-    if (rinc_systemKey()) { rinc_home(); continue; }
-    int c = rinc_keyboardChar(), connected = stdio_usb_connected();
-    if (connected && !was_connected) { sleep_ms(100); printf("%s", rinc_keyboardEvents()); } /* a terminal arrived */
-    was_connected = connected;
-    if (c >= 0) rinc_replChar(&rinc_repl, c);
-    if ((c = getchar_timeout_us(0)) != PICO_ERROR_TIMEOUT) rinc_replChar(&rinc_repl, c);
-    if (rinc_launch == 3) { rinc_launch = 0; rinc_home(); }
-  }
+  rinc_open("home"); /* (the board starts at home) */
+  for (;;) rinc_frameNow();
 }

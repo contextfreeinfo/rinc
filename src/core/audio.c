@@ -1,5 +1,5 @@
 /* sound: 8 voices mixed to 48 kHz 16-bit stereo, the same on every platform. A voice plays sound data
-   from the cart's own memory as it goes (8- or 16-bit signed, or 4-bit IMA ADPCM; mono or stereo; at
+   from the app's own memory as it goes (8- or 16-bit signed, or 4-bit IMA ADPCM; mono or stereo; at
    any rate), with its volume, rate and pan changeable while it plays, and optionally a loop. Linear
    interpolation between samples. The platform asks for samples (rinc_audioMix) from wherever its
    output wants them, and brackets changes from host procs with its own lock (rinc_audioLock).
@@ -216,7 +216,7 @@ void rinc_HOT rinc_audioMix(int16_t *out, int frames) {
   }
 }
 
-/* the system's volume (a keyboard's volume knob, say; not the cart's to change): a step up or down,
+/* the system's volume (a keyboard's volume knob, say; not the app's to change): a step up or down,
    2.5 dB each, from full down to -40 dB; 0 turns mute on or off */
 void rinc_audioVolume(int step) {
   if (!step) rinc_muted = !rinc_muted;

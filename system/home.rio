@@ -1,4 +1,4 @@
-# Launcher: the apps on the card, and the console. Type to narrow the list, up and down to choose,
+# Home: the apps on the card, and the console. Type to narrow the list, up and down to choose,
 # Enter to start one (or the d-pad and A). Esc clears what's typed. Built into the firmware: the
 # board starts here, and the Windows key (or a controller's Xbox button) comes back. An app's title and
 # description come from its first line, as "# Title: what it does".
@@ -95,7 +95,7 @@ start :: proc()
   end
   k := shown[pick]
   if k < 0
-    pc.openConsole()
+    pc.launch("console")
   else
     pc.launch(names[nameAt[k]:nameAt[k] + nameLen[k]].asString())
   end
@@ -115,7 +115,7 @@ update* :: proc()
         if c == 27
           filter.clear()
         else
-          if c >= 32 and filter.len() < 24
+          if c >= 32 and c < 127 and filter.len() < 24  # (not the editing keys: the arrows are buttons too)
             ok := filter.push(c)
           end
         end

@@ -1,7 +1,7 @@
 # Building
 
 This guide is about the Rinc in this repository: the Fruit Jam firmware, the desktop program and the
-web player, all from one C core. What any Rinc provides is in [the platform](../spec/README.md).
+web player, all from one C core. What any Rinc provides is in [the platform](../spec/platform.md).
 
 ```sh
 git clone --recursive https://github.com/rincpc/rinc     # (or: git submodule update --init)
@@ -24,16 +24,17 @@ lib/rio/           Rio, as a git submodule
 lib/Pico-PIO-USB/  USB host over PIO, for keyboards on the Fruit Jam
 lib/fatfs/         FatFs, the SD card's filesystem (vendored)
 src/core/          shared by every platform: the screen, palette, font and console, host procs
-                   (rinc.c, audio.c), the REPL, and pc.rio (the host procs, written out in Rio)
+                   (rinc.c, audio.c), the built-in apps (apps.c), the terminal REPL, and pc.rio
+                   (the host procs, written out in Rio)
 src/rp2350/        the Fruit Jam: HDMI out (video.c), USB keyboards (keyboard.c) and controllers
                    (gamepad.c), sound (audio.c), the SD card (sd.c), the main loop
 src/desktop/       a window (SDL3, built in) or headless
 src/web/           wasm for a web page, and the page around it (page.html)
-system/            the launcher, a cart built into the firmware
-carts/             demo carts
+system/            the built-in apps, ordinary apps: home.rio and console.rio
+apps/             demo apps
 tests/             pc.c: pc.rio matches what Rinc registers
-tools/             font.py (the font table), web.py (a cart as one HTML page, or just the wasm),
-                   send.py (a cart to the board), embed.cmake (the web player, built into the desktop
+tools/             font.py (the font table), web.py (an app as one HTML page, or just the wasm),
+                   send.py (an app to the board), embed.cmake (the web player, built into the desktop
                    rinc), adpcm.py (sound into IMA ADPCM)
 docs/              these docs: SUMMARY.md sets the order; mdbook builds them as a site
 ```

@@ -1,19 +1,25 @@
 /* Rinc on the desktop:
-     rinc                       a rio REPL in the terminal
-     rinc cart.rio              run a cart in a window: its top-level code and main, then update* and
-                               draw* 60 times a second if it's a game (arrows, V C X Z: btn; Esc quits)
-     -frames n                 instead of a window, run n frames (Z held for the first few)
+     rinc                       a Rio REPL in the terminal
+     rinc app.rio               run an app in a window: its top-level code and main, then update* and
+                               draw* 60 times a second if it's a game (arrows, V C X Z: btn; Shift
+                               tapped then held: home; closing the window quits)
+     -frames n                 instead of a window, run n frames (A held for the first few)
      -o screen.ppm             instead of a window, afterwards write the screen as an image
      -wav sound.wav            with -frames: the sound those frames made, as a WAV file
-     -i cart.img               compile to an image (see rio_loadImage) instead, and list the host
+     -i app.img                compile to an image (see rio_loadImage) instead, and list the host
                                procs its code calls (tools/web.py uses both)
-     -export game[.exe]        a copy of this rinc with the cart in it, compiled: it runs the cart
+     -export game[.exe]        a copy of this rinc with the app in it, compiled: it runs the app
                                (with the options above, too), so it's a game to hand out
      -runner rinc-linux-x86_64  with -export: copy that rinc instead (another system's, say, from a
                                release), for a game for that system
-     -web game.html            one page that plays the cart in a browser: the web player (built in
-                               when RINC_WEB_WASM is set) with the cart, compiled, all inline
-   The app space is 256 KB, as on the Fruit Jam and the web, so a cart that fits one fits all three.
+     -web game.html            one page that plays the app in a browser: the web player (built in
+                               when RINC_WEB_WASM is set) with the app, compiled, all inline
+     -m                        how near the app comes to its limits, compiling and running (as on
+                               every Rinc), instead of running it
+     -app console              a built-in app instead of a file: home or console (pc.launch
+                               switches to these too)
+     -type text                type this, as fast as the app takes it (\n Enter, \e Esc, \t Tab)
+   The app space is 256 KB, as on the Fruit Jam and the web, so an app that fits one fits all three.
    The window is SDL3, linked in statically (rinc_SDL, on by default). */
 #define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
@@ -59,11 +65,28 @@ static int rinc_savePpm(const char *path) { /* the screen through the palette, a
   return fclose(f);
 }
 
-/* the cart compiled, as an image in image[]: its size, or 0 after reporting why not. list: print the
+/* the app in rinc_src compiled as every Rinc compiles one (rinc_compile): 0, or -1 after saying why
+   (and, if it ran out of something, how near each of its limits it came) */
+static rio_Usage rinc_usage;
+static int rinc_compileApp(const char *app, size_t n) {
+  static char text[1024];
+  int res;
+  rio_trackUsage(&rinc_vm, &rinc_usage);
+  if (!(res = rinc_compile(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, rinc_src, (uint32_t)n))) return 0;
+  fflush(stdout);
+  if (res > 0) fprintf(stderr, "%s: too big (64 KB is the most)\n", app);
+  else {
+    fprintf(stderr, "%s:%s\n", app, rio_error(&rinc_vm));
+    if (rinc_atLimit(rio_error(&rinc_vm))) { rio_usageText(&rinc_usage, text, sizeof text); fputs(text, stderr); }
+  }
+  return -1;
+}
+
+/* the app compiled, as an image in image[]: its size, or 0 after reporting why not. list: print the
    host procs its code calls, one per line */
-static uint32_t rinc_makeImage(const char *cart, size_t n, int list) {
+static uint32_t rinc_makeImage(const char *app, size_t n, int list) {
   uint32_t size, pc; uint8_t used[rio_MAX_FFI] = {0}; int k;
-  if (rio_compile(&rinc_vm, rinc_src, (uint32_t)n)) { fprintf(stderr, "%s:%s\n", cart, rio_error(&rinc_vm)); return 0; }
+  if (rinc_compileApp(app, n)) return 0;
   for (pc = 0; pc < rinc_vm.codeLen; pc++) if (rinc_vm.code[pc].op == rio_Op_ffi && rinc_vm.code[pc].c < rio_MAX_FFI) used[rinc_vm.code[pc].c] = 1;
   for (k = 0; list && k < rinc_vm.ffiCount; k++) if (used[k]) printf("host %s\n", rinc_vm.ffi[k].name);
   if (!(size = rio_saveImage(&rinc_vm, rinc_image, sizeof rinc_image))) fprintf(stderr, "rinc: can't make an image\n");
@@ -78,7 +101,7 @@ static int rinc_writeFile(const char *path, const void *a, size_t an, const void
 }
 
 /* -export: this program's own file, with an image after it and then a trailer: its size (4 bytes,
-   little-endian) and rinc_MAGIC. At startup rinc looks for one (so a cart in it runs instead of the REPL) */
+   little-endian) and rinc_MAGIC. At startup rinc looks for one (so an app in it runs instead of the REPL) */
 #define rinc_MAGIC "RINCAPP0"
 static char *rinc_readAll(const char *path, size_t *len) {
   FILE *f; char *b; long n;
@@ -101,7 +124,7 @@ static char *rinc_selfFile(size_t *len) {
 #endif
   return rinc_readAll(path, len);
 }
-/* the size of a cart at the end of file b (n long), or 0 if there's none */
+/* the size of an app at the end of file b (n long), or 0 if there's none */
 static uint32_t rinc_carried(const char *b, size_t n) {
   uint32_t k;
   if (n < 12 || memcmp(b + n - 8, rinc_MAGIC, 8)) return 0;
@@ -111,7 +134,7 @@ static uint32_t rinc_carried(const char *b, size_t n) {
 static int rinc_exportNative(const char *path, const char *runner, uint32_t size) {
   size_t n; char *self = runner ? rinc_readAll(runner, &n) : rinc_selfFile(&n), tail[12]; int r;
   if (!self) { fprintf(stderr, runner ? "rinc: can't read %s\n" : "rinc: can't read my own program file\n", runner); return 1; }
-  if (rinc_carried(self, n)) n -= rinc_carried(self, n) + 12; /* (exporting from an export: just this cart) */
+  if (rinc_carried(self, n)) n -= rinc_carried(self, n) + 12; /* (exporting from an export: just this app) */
   memcpy(tail, &size, 4); memcpy(tail + 4, rinc_MAGIC, 8);
   r = rinc_writeFile(path, self, n, rinc_image, size, tail, 12);
   free(self);
@@ -137,12 +160,12 @@ static size_t rinc_base64(const uint8_t *b, size_t n, char *out) {
   }
   return k;
 }
-/* -web: the page, with the title (the cart's name), the wasm and the image in place of {{TITLE}},
-   {{WASM}} and {{CART}} */
-static int rinc_exportWeb(const char *path, const char *cart, uint32_t size) {
+/* -web: the page, with the title (the app's name), the wasm and the image in place of {{TITLE}},
+   {{WASM}} and {{APP}} */
+static int rinc_exportWeb(const char *path, const char *app, uint32_t size) {
 #if rinc_WEB
-  const char *p = rinc_webPage, *name = cart, *q; char *wasm, *img, title[256]; size_t nw, ni, k = 0; FILE *f; int bad = 0;
-  for (q = cart; *q; q++) if (*q == '/' || *q == '\\') name = q + 1;
+  const char *p = rinc_webPage, *name = app, *q; char *wasm, *img, title[256]; size_t nw, ni, k = 0; FILE *f; int bad = 0;
+  for (q = app; *q; q++) if (*q == '/' || *q == '\\') name = q + 1;
   while (name[k] && name[k] != '.' && k < sizeof title - 1) { title[k] = strchr("<>&\"", name[k]) ? '_' : name[k]; k++; }
   title[k] = 0;
   wasm = malloc(4 * (rinc_webWasmSize / 3 + 1)); img = malloc(4 * (size / 3 + 1));
@@ -151,7 +174,7 @@ static int rinc_exportWeb(const char *path, const char *cart, uint32_t size) {
   while (*p) {
     if (!strncmp(p, "{{TITLE}}", 9)) { fputs(title, f); p += 9; }
     else if (!strncmp(p, "{{WASM}}", 8)) { fwrite(wasm, 1, nw, f); p += 8; }
-    else if (!strncmp(p, "{{CART}}", 8)) { fwrite(img, 1, ni, f); p += 8; }
+    else if (!strncmp(p, "{{APP}}", 7)) { fwrite(img, 1, ni, f); p += 7; }
     else fputc(*p++, f);
   }
   bad = ferror(f); if (fclose(f)) bad = 1;
@@ -159,7 +182,7 @@ static int rinc_exportWeb(const char *path, const char *cart, uint32_t size) {
   if (bad) { fprintf(stderr, "rinc: can't write %s\n", path); return 1; }
   return 0;
 #else
-  (void)path; (void)cart; (void)size;
+  (void)path; (void)app; (void)size;
   fprintf(stderr, "rinc: this rinc was built without the web player (RINC_WEB_WASM)\n");
   return 1;
 #endif
@@ -174,6 +197,35 @@ static int rinc_saveWav(const char *path, uint32_t frames) {
   v = 36 + bytes; memcpy(h + 4, &v, 4); v = rinc_RATE; memcpy(h + 24, &v, 4); v = rinc_RATE * 4; memcpy(h + 28, &v, 4);
   fwrite(h, 1, 40, f); fwrite(&bytes, 4, 1, f); fwrite(rinc_wav, 4, frames, f);
   return fclose(f);
+}
+
+/* -type: what to type, as fast as the app takes it (\n Enter, \e Esc, \t Tab, \\ a backslash) */
+static const char *rinc_typing;
+static void rinc_typeMore(void) {
+  while (rinc_typing && *rinc_typing && rinc_textRoom() > 0) {
+    int c = (unsigned char)*rinc_typing++;
+    if (c == '\\' && *rinc_typing) {
+      c = (unsigned char)*rinc_typing++;
+      if (c == 'e') { rinc_textEsc(); continue; }
+      c = c == 'n' ? 13 : c == 't' ? 9 : c;
+    }
+    rinc_textPush(c);
+  }
+}
+
+/* pc.launch, as far as the desktop can (it has no apps on storage): to a built-in app. 0: switched,
+   with *game saying whether it has frames; -1: not (said why) */
+static int rinc_switch(int *game) {
+  const char *src; int len, fn;
+  rinc_launch = 0;
+  if (!(src = rinc_builtinApp(rinc_launchName, &len))) { fprintf(stderr, "rinc: no app %s here (the desktop has no apps on storage)\n", rinc_launchName); return -1; }
+  rinc_audioReset();
+  if (rinc_start(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, rinc_put) || rinc_compile(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, src, (uint32_t)len) || rio_run(&rinc_vm) ||
+      ((fn = rio_findProc(&rinc_vm, "main")) >= 0 && rio_call(&rinc_vm, fn))) {
+    fflush(stdout); fprintf(stderr, "%s.rio:%s\n", rinc_launchName, rio_error(&rinc_vm)); return -1;
+  }
+  *game = rio_findProc(&rinc_vm, "update") >= 0 || rio_findProc(&rinc_vm, "draw") >= 0;
+  return 0;
 }
 
 #if rinc_SDL
@@ -211,6 +263,16 @@ static uint16_t rinc_readPad(void) {
   return b;
 }
 
+/* editing keys and Ctrl+letter, for key() (typing arrives as text) */
+static void rinc_sdlKey(const SDL_KeyboardEvent *k) {
+  SDL_Keycode c = k->key;
+  int code = c == SDLK_LEFT ? rinc_Key_left : c == SDLK_RIGHT ? rinc_Key_right : c == SDLK_UP ? rinc_Key_up : c == SDLK_DOWN ? rinc_Key_down :
+             c == SDLK_HOME ? rinc_Key_home : c == SDLK_END ? rinc_Key_end : c == SDLK_DELETE ? rinc_Key_delete :
+             c == SDLK_PAGEUP ? rinc_Key_pageUp : c == SDLK_PAGEDOWN ? rinc_Key_pageDown : c == SDLK_TAB ? 9 : 0;
+  if (!code && (k->mod & SDL_KMOD_CTRL) && c >= SDLK_A && c <= SDLK_Z) code = (int)(c - SDLK_A) + 1;
+  if (code) rinc_textKey(code);
+}
+
 /* the screen in a window, scaled up by whole steps; a game gets a frame every 1/60 s */
 static int rinc_window(const char *title) {
   SDL_Window *w; SDL_Renderer *r; SDL_Texture *tex; uint64_t next; int game = 1, running = 1;
@@ -232,21 +294,39 @@ static int rinc_window(const char *title) {
   while (running) {
     SDL_Event e; const bool *k; uint16_t *px; int pitch, x, y;
     while (SDL_PollEvent(&e)) {
-      if (e.type == SDL_EVENT_QUIT || (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE)) running = 0;
+      if (e.type == SDL_EVENT_QUIT) running = 0;
+      if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) rinc_textEsc(); /* (Esc is the app's: closing the window quits) */
       if (e.type == SDL_EVENT_TEXT_INPUT) { const char *t = e.text.text; while (*t) rinc_textPush((unsigned char)*t++); } /* (key(): typing) */
       if (e.type == SDL_EVENT_KEY_DOWN && (e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER)) rinc_textPush(13);
       if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_BACKSPACE) rinc_textPush(8);
+      if (e.type == SDL_EVENT_KEY_DOWN) rinc_sdlKey(&e.key);
       if (e.type == SDL_EVENT_GAMEPAD_ADDED && !rinc_pad) rinc_pad = SDL_OpenGamepad(e.gdevice.which);
       if (e.type == SDL_EVENT_GAMEPAD_REMOVED && rinc_pad && SDL_GetGamepadID(rinc_pad) == e.gdevice.which) { SDL_CloseGamepad(rinc_pad); rinc_pad = 0; }
     }
     k = SDL_GetKeyboardState(0);
     rinc_buttons = rinc_readPad() | (uint16_t)(k[SDL_SCANCODE_LEFT] * rinc_Button_left | k[SDL_SCANCODE_RIGHT] * rinc_Button_right | k[SDL_SCANCODE_UP] * rinc_Button_up |
       k[SDL_SCANCODE_DOWN] * rinc_Button_down | k[SDL_SCANCODE_V] * rinc_Button_a | k[SDL_SCANCODE_C] * rinc_Button_b | k[SDL_SCANCODE_X] * rinc_Button_x | k[SDL_SCANCODE_Z] * rinc_Button_y);
+    { /* the system key: Shift tapped then held (the Windows key is the desktop's own), or a controller's guide button */
+      int other = 0, s;
+      for (s = 0; s < SDL_SCANCODE_COUNT; s++) other |= k[s] && s != SDL_SCANCODE_LSHIFT && s != SDL_SCANCODE_RSHIFT;
+      if (rinc_systemKey(rinc_pad && SDL_GetGamepadButton(rinc_pad, SDL_GAMEPAD_BUTTON_GUIDE), k[SDL_SCANCODE_LSHIFT] || k[SDL_SCANCODE_RSHIFT], other)) {
+        strcpy(rinc_launchName, "home"); rinc_launch = 1;
+      }
+    }
     while (game && SDL_GetTicksNS() >= next) { /* 60 frames a second, whatever the display's rate */
-      int res = rinc_frame(&rinc_vm);
+      int res;
+      rinc_typeMore();
+      res = rinc_frame(&rinc_vm);
       if (res) { game = 0; if (res < 0) { fprintf(stderr, "%s\n", rio_error(&rinc_vm)); running = 0; } }
+      if (rinc_launch) break;
       next += 1000000000ull / 60;
       if (SDL_GetTicksNS() > next + 100000000ull) next = SDL_GetTicksNS(); /* (fell far behind: skip ahead) */
+    }
+    if (rinc_launch) { /* pc.launch, or the system key (a failed switch leaves what was running) */
+      int was = game;
+      if (rinc_switch(&game)) game = was;
+      else running = 1;
+      next = SDL_GetTicksNS();
     }
     if (SDL_LockTexture(tex, 0, (void **)&px, &pitch)) {
       for (y = 0; y < rinc_H; y++)
@@ -264,7 +344,8 @@ static int rinc_window(const char *title) {
 #endif
 
 int main(int argc, char **argv) {
-  const char *cart = 0, *out = 0, *img = 0, *wavout = 0, *exp = 0, *web = 0, *runner = 0; int i, fn, frames = 0; uint32_t size = 0;
+  const char *app = 0, *out = 0, *img = 0, *wavout = 0, *exp = 0, *web = 0, *runner = 0, *builtin = 0; int i, fn, frames = 0, game, memReport = 0; uint32_t size = 0;
+  char appFile[48];
   for (i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "-o") && i + 1 < argc) out = argv[++i];
     else if (!strcmp(argv[i], "-frames") && i + 1 < argc) frames = atoi(argv[++i]);
@@ -273,42 +354,60 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[i], "-export") && i + 1 < argc) exp = argv[++i];
     else if (!strcmp(argv[i], "-web") && i + 1 < argc) web = argv[++i];
     else if (!strcmp(argv[i], "-runner") && i + 1 < argc) runner = argv[++i];
-    else if (argv[i][0] == '-' || cart) {
-      fprintf(stderr, "usage: rinc [cart.rio] [-frames n] [-o screen.ppm] [-wav sound.wav] [-i cart.img] [-export game [-runner rinc]] [-web game.html]\n");
+    else if (!strcmp(argv[i], "-app") && i + 1 < argc) builtin = argv[++i];
+    else if (!strcmp(argv[i], "-m")) memReport = 1;
+    else if (!strcmp(argv[i], "-type") && i + 1 < argc) rinc_typing = argv[++i];
+    else if (argv[i][0] == '-' || app) {
+      fprintf(stderr, "usage: rinc [app.rio | -app name] [-m] [-frames n] [-o screen.ppm] [-wav sound.wav] [-type text] [-i app.img] [-export game [-runner rinc]] [-web game.html]\n");
       return 2;
     }
-    else cart = argv[i];
+    else app = argv[i];
   }
   rinc_t0 = clock(); rinc_time = rinc_now;
   if (rinc_start(&rinc_vm, rinc_appSpace, sizeof rinc_appSpace, rinc_put)) { fprintf(stderr, "rinc: can't start\n"); return 1; }
-  if (!cart) { /* an exported game: the cart it carries */
+  if (builtin) { /* a built-in app */
+    int len;
+    if (!rinc_builtinApp(builtin, &len) || app) { fprintf(stderr, "rinc: -app is home or console, without an app\n"); return 2; }
+    snprintf(appFile, sizeof appFile, "%s.rio", builtin);
+    app = appFile;
+  }
+  if (!app) { /* an exported game: the app it carries */
     size_t n; char *self = rinc_selfFile(&n);
     if (self && (size = rinc_carried(self, n))) memcpy(rinc_image, self + n - 12 - size, size);
     free(self);
-    if (size) cart = argc > 0 ? argv[0] : "rinc";
+    if (size) app = argc > 0 ? argv[0] : "rinc";
   }
-  if (cart) {
+  if (app) {
     if (!size) {
-      FILE *f = fopen(cart, "rb"); size_t n;
-      if (!f) { fprintf(stderr, "rinc: can't open %s\n", cart); return 2; }
-      n = fread(rinc_src, 1, sizeof rinc_src, f); fclose(f);
+      FILE *f = builtin ? 0 : fopen(app, "rb"); size_t n; int len;
+      if (builtin) { const char *src = rinc_builtinApp(builtin, &len); memcpy(rinc_src, src, (size_t)len); n = (size_t)len; }
+      else if (!f) { fprintf(stderr, "rinc: can't open %s\n", app); return 2; }
+      else { n = fread(rinc_src, 1, sizeof rinc_src, f); fclose(f); }
       if (img || exp || web) {
-        if (!(size = rinc_makeImage(cart, n, img != 0))) return 1;
+        if (!(size = rinc_makeImage(app, n, img != 0))) return 1;
         if (img && rinc_writeFile(img, rinc_image, size, 0, 0, 0, 0)) return 1;
         if (exp && rinc_exportNative(exp, runner, size)) return 1;
-        return web ? rinc_exportWeb(web, cart, size) : 0;
+        return web ? rinc_exportWeb(web, app, size) : 0;
       }
-      if (rio_compile(&rinc_vm, rinc_src, (uint32_t)n)) { fprintf(stderr, "%s:%s\n", cart, rio_error(&rinc_vm)); return 1; }
-    } else if (rio_loadImage(&rinc_vm, rinc_image, size)) { fprintf(stderr, "%s: %s\n", cart, rio_error(&rinc_vm)); return 1; }
+      if (rinc_compileApp(app, n)) return 1;
+      if (memReport) { /* -m: how near its limits it came, compiling and running, as on every Rinc */
+        static char text[1024];
+        rio_usageText(&rinc_usage, text, sizeof text);
+        printf("%s: fits in the 256 KB app space\n%s", app, text);
+        return 0;
+      }
+    } else if (rio_loadImage(&rinc_vm, rinc_image, size)) { fprintf(stderr, "%s: %s\n", app, rio_error(&rinc_vm)); return 1; }
     if (rio_run(&rinc_vm) || ((fn = rio_findProc(&rinc_vm, "main")) >= 0 && rio_call(&rinc_vm, fn))) {
-      fflush(stdout); fprintf(stderr, "%s:%s\n", cart, rio_error(&rinc_vm)); return 1;
+      fflush(stdout); fprintf(stderr, "%s:%s\n", app, rio_error(&rinc_vm)); return 1;
     }
 #if rinc_SDL
-    if (!out && !frames) return rinc_window(cart);
+    if (!out && !frames) return rinc_window(app);
 #endif
-    for (i = 0; i < frames; i++) { /* a game, without a window: Z held for the first frames (to start it) */
+    for (i = 0; i < frames; i++) { /* a game, without a window: A held for the first frames (to start it) */
       rinc_buttons = i < 3 ? rinc_Button_a : 0;
-      if (rinc_frame(&rinc_vm) < 0) { fflush(stdout); fprintf(stderr, "%s:%s\n", cart, rio_error(&rinc_vm)); return 1; }
+      rinc_typeMore();
+      if (rinc_frame(&rinc_vm) < 0) { fflush(stdout); fprintf(stderr, "%s:%s\n", app, rio_error(&rinc_vm)); return 1; }
+      if (rinc_launch && rinc_switch(&game)) return 1;
       if (wavout && i < 60 * 60) rinc_audioMix(rinc_wav + i * (rinc_RATE / 60) * 2, rinc_RATE / 60); /* (a frame's worth of sound) */
     }
     if (wavout && rinc_saveWav(wavout, (uint32_t)(frames < 3600 ? frames : 3600) * (rinc_RATE / 60))) { fprintf(stderr, "rinc: can't write %s\n", wavout); return 1; }

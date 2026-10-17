@@ -6,5 +6,6 @@ void rinc_keyboardSetup(void);       /* before stdio_init_all */
 void rinc_keyboardStart(void);
 const char *rinc_keyboardEvents(void); /* devices seen, as text */
 int rinc_keyboardChar(void);         /* runs the USB host; the next typed character, or -1 */
+void rinc_keyboardPoll(void);        /* just runs the USB host (keyboards and controllers) */
 extern uint8_t rinc_keysDown[32];    /* bit k: HID usage k is held down */
 #endif

@@ -6,7 +6,7 @@
    Each screen line goes through the palette once, into one of two line buffers, and is sent for two
    lines in a row (doubling vertically). That's 320 lookups per screen line, about 6% of core 1.
 
-   Carts draw into rinc_screen. At each vertical blank a DMA copies it to the buffer being shown, so
+   Apps draw into rinc_screen. At each vertical blank a DMA copies it to the buffer being shown, so
    the picture is always a whole frame (rinc_frames counts them, for a flip() to wait on).
 
    Sound goes in data islands, one in each line's sync pulse: audio packets of 4 samples (32 samples

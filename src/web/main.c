@@ -1,7 +1,7 @@
-/* Rinc in a browser, as wasm: the page (tools/web.py makes it) hands over a cart, then calls frame()
+/* Rinc in a browser, as wasm: the page (tools/web.py makes it) hands over an app, then calls frame()
    60 times a second and draws the screen. Imports from the page: put (text out), now (seconds).
    No emscripten: plain clang/zig wasm32, with only the C library rio needs. Built with rio_NO_COMPILER,
-   the cart is an image (made by rinc -i), and the wasm is a quarter the size; otherwise it's source. */
+   the app is an image (made by rinc -i), and the wasm is a quarter the size; otherwise it's source. */
 #include "rinc.h"
 
 /* exported to the page under name (the C function is rinc_web<Name>) */
@@ -10,7 +10,7 @@ __attribute__((import_module("env"), import_name("put"))) extern void js_put(con
 __attribute__((import_module("env"), import_name("now"))) extern float js_now(void);
 
 static _Alignas(16) uint8_t rinc_appSpace[256 << 10]; /* the same app space as on the board */
-static char rinc_src[128 << 10]; /* the cart: its source, or its image */
+static char rinc_src[128 << 10]; /* the app: its source, or its image */
 static rio_Vm rinc_vm;
 static uint32_t rinc_rgba[rinc_W * rinc_H];
 static int16_t rinc_sound[2048 * 2];
@@ -18,7 +18,7 @@ static int16_t rinc_sound[2048 * 2];
 static void rinc_put(const char *s, int n) { js_put(s, n); }
 
 rinc_EXPORT(source) char *rinc_webSource(void) { return rinc_src; }
-/* start the cart in source(): 0, or -1 (error() says why) */
+/* start the app in source(): 0, or -1 (error() says why) */
 rinc_EXPORT(start) int rinc_webStart(int len) {
   int fn;
   rinc_time = js_now;

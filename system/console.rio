@@ -1,0 +1,478 @@
+# Console: Rio, typed and run, and the apps on the card. A line on its own can be a command: run (what's
+# been typed, as a game: Esc stops it), ls, load name, run name, save name, delete name, home. Built into
+# the firmware, an ordinary app: the Rio it runs is a session (pc.rioStart) in memory of its own.
+
+COLS :: 53        # 6x9 characters, on the 320x240 screen
+ROWS :: 26
+WHITE :: 7
+GRAY :: 6
+RED :: 8
+BLUE :: 12
+
+# the session's memory, handed over to it: the typed program's code and data, and its compiler's tables
+sessionMem: Blob[147456]
+sessionTables: Blob[32768]
+file: Blob[24576]  # an app's source, loading or saving
+fileLen := 0
+logBuf: Blob[2048]
+
+# the screen: finished rows, then the line being typed
+Row :: struct
+  text: Blob[..53]
+  color: Int
+end
+rows: [26]Row
+rowCount := 0
+
+addRow :: proc(text: String, color: Int)
+  if rowCount == ROWS
+    for i in 0..<ROWS - 1
+      rows[i] = rows[i + 1]
+    end
+    rowCount -= 1
+  end
+  r := &rows[rowCount]
+  r.text.clear()
+  for c in text
+    r.text.push(c)
+  end
+  r.color = color
+  rowCount += 1
+end
+
+# text on the screen, its lines wrapped at the screen's width, and each line to the log too (the
+# serial port, on the board)
+say :: proc(text: String, color: Int)
+  start := 0
+  for i in 0..=text.len()
+    if i == text.len() or text[i] == 10
+      if i < text.len() or start < i or text.len() == 0
+        line := text[start:i]
+        log(line)
+        at := 0
+        for at + COLS < line.len()
+          addRow(line[at:at + COLS], color)
+          at += COLS
+        end
+        addRow(line[at:], color)
+      end
+      start = i + 1
+    end
+  end
+end
+
+# ---------------------------------------------------------------- the session
+
+showLog :: proc()
+  for
+    n := pc.rioLog(logBuf[:])
+    if n <= 0
+      break
+    end
+    say(logBuf[:n].asString(), GRAY)
+  end
+end
+
+showError :: proc()
+  n := pc.rioError(logBuf[:])
+  say(logBuf[:n].asString(), RED)
+end
+
+fresh :: proc() -> Bool
+  if pc.rioStart(sessionMem[:], sessionTables[:]) != 0
+    showError()
+    return false
+  end
+  return true
+end
+
+# ---------------------------------------------------------------- typing
+
+Mode :: enum
+  typing, running, saving
+end
+mode: Mode
+acc: Blob[..4096]  # an unfinished input's lines so far
+line: Blob[..200]  # the line being typed
+cur := 0           # where in it
+Hist :: struct
+  text: Blob[..200]
+end
+hist: [16]Hist
+histCount := 0
+back := 0          # how far back up and down have gone (0: the line being typed)
+saveName: Blob[..32]
+
+blank :: proc(t: String) -> Bool
+  for c in t
+    if c != 32
+      return false
+    end
+  end
+  return true
+end
+
+trim :: proc(t: String) -> String
+  a := 0
+  b := t.len()
+  for a < b and t[a] == 32
+    a += 1
+  end
+  for b > a and t[b - 1] == 32
+    b -= 1
+  end
+  return t[a:b]
+end
+
+setLine :: proc(t: String)
+  line.clear()
+  for c in t
+    line.push(c)
+  end
+  cur = line.len()
+end
+
+remember :: proc(t: String)
+  if blank(t)
+    return
+  end
+  if histCount == 16
+    for i in 0..<15
+      hist[i] = hist[i + 1]
+    end
+    histCount -= 1
+  end
+  hist[histCount].text.clear()
+  hist[histCount].text.pushAll(t)
+  histCount += 1
+end
+
+recall :: proc(step: Int)
+  b := back + step
+  if b < 0 or b > histCount
+    return
+  end
+  back = b
+  if b == 0
+    setLine("")
+  else
+    setLine(hist[histCount - b].text[:].asString())
+  end
+end
+
+insert :: proc(c: Int)
+  if line.push(c)
+    i := line.len() - 1
+    for i > cur
+      line[i] = line[i - 1]
+      i -= 1
+    end
+    line[cur] = c
+    cur += 1
+  end
+end
+
+# ---------------------------------------------------------------- commands
+
+ls :: proc()
+  n := pc.apps()
+  if n == 0
+    say("no apps (or no card): /rinc/apps", GRAY)
+    return
+  end
+  names: Blob[..2048]
+  name: Blob[32]
+  for i in 0..<n
+    k := min(pc.appName(i, name[:]), 32)
+    names.pushAll(name[:k].asString())
+    names.pushAll("  ")
+  end
+  say(names[:].asString(), WHITE)
+end
+
+load :: proc(name: String)
+  msg: Blob[..80]
+  n := pc.appSource(name, file[:])
+  if n < 0
+    msg.format("can't open ", name)
+    say(msg[:].asString(), RED)
+    return
+  end
+  if n > file.len()
+    msg.format(name, " is too big to load here (", n, " bytes)")
+    say(msg[:].asString(), RED)
+    return
+  end
+  if not fresh()
+    return
+  end
+  r := pc.rioEval(file[:n].asString())
+  showLog()
+  if r < 0
+    showError()
+  else if r == 1
+    say("(it ends unfinished)", RED)
+  else
+    msg.format("loaded ", name)
+    say(msg[:].asString(), GRAY)
+  end
+end
+
+startSave :: proc(name: String)
+  saveName.clear()
+  if not saveName.pushAll(name)
+    say("names are up to 32 letters, digits, _ and -", RED)
+    return
+  end
+  fileLen = 0
+  mode = .saving
+  say("type or paste it, then Ctrl-D (Ctrl-C gives up)", GRAY)
+end
+
+finishSave :: proc()
+  msg: Blob[..80]
+  mode = .typing
+  if pc.appSave(saveName[:].asString(), file[:fileLen].asString()) != 0
+    msg.format("couldn't save ", saveName[:])
+    say(msg[:].asString(), RED)
+  else
+    msg.format("saved ", fileLen, " bytes")
+    say(msg[:].asString(), GRAY)
+  end
+end
+
+# a line on its own that's a command: true if it was one
+command :: proc(t: String) -> Bool
+  msg: Blob[..80]
+  if t == "run"
+    mode = .running
+    return true
+  end
+  if t == "ls"
+    ls()
+    return true
+  end
+  if t == "home"
+    pc.launch("home")
+    return true
+  end
+  w := 0
+  for w < t.len() and t[w] != 32
+    w += 1
+  end
+  if w == t.len()
+    return false
+  end
+  word := t[:w]
+  name := trim(t[w:])
+  if word == "load"
+    load(name)
+  else if word == "run"
+    pc.launch(name)                      # an app runs as itself, in all of its memory
+  else if word == "save"
+    startSave(name)
+  else if word == "delete"
+    if pc.appDelete(name) == 0
+      msg.format("deleted ", name)
+      say(msg[:].asString(), GRAY)
+    else
+      msg.format("can't delete ", name)
+      say(msg[:].asString(), RED)
+    end
+  else
+    return false
+  end
+  return true
+end
+
+startsWith :: proc(t: String, word: String) -> Bool
+  return t.len() >= word.len() and t[:word.len()] == word
+end
+
+enter :: proc()
+  shown: Blob[..256]
+  t := trim(line[:].asString())
+  if acc.len() > 0 and line.len() >= 2 and (startsWith(t, "end") or startsWith(t, "else") or startsWith(t, "case"))
+    line.remove(0)                       # (a step back out)
+    line.remove(0)
+  end
+  if acc.len() == 0
+    shown.pushAll("> ")
+  else
+    shown.pushAll(". ")
+  end
+  shown.pushAll(line[:].asString())
+  say(shown[:].asString(), WHITE)
+  text := line[:].asString()
+  remember(text)
+  back = 0
+  if blank(text)
+    if acc.len() > 0
+      say("(unfinished input dropped)", GRAY)
+      acc.clear()
+    end
+  else if acc.len() == 0 and command(trim(text))
+    acc.clear()
+  else if not (acc.pushAll(text) and acc.push(10))
+    say("(input too long)", RED)
+    acc.clear()
+  else
+    r := pc.rioEval(acc[:].asString())
+    showLog()
+    if r == 1
+      setLine("")
+      for i in 0..<pc.rioIndent(acc[:].asString()) * 2
+        line.push(32)
+      end
+      cur = line.len()
+      return
+    end
+    if r < 0
+      showError()
+    end
+    acc.clear()
+  end
+  setLine("")
+end
+
+typing :: proc(c: Int)
+  if c == 13
+    enter()
+  else if c == 8
+    if cur > 0
+      line.remove(cur - 1)
+      cur -= 1
+    end
+  else if c == 134                       # Delete
+    if cur < line.len()
+      line.remove(cur)
+    end
+  else if c == 128
+    cur = max(cur - 1, 0)
+  else if c == 129
+    cur = min(cur + 1, line.len())
+  else if c == 132 or c == 1             # Home, Ctrl-A
+    cur = 0
+  else if c == 133 or c == 5             # End, Ctrl-E
+    cur = line.len()
+  else if c == 130
+    recall(1)
+  else if c == 131
+    recall(-1)
+  else if c == 3                         # Ctrl-C: drop what's typed
+    say("^C", GRAY)
+    acc.clear()
+    setLine("")
+  else if c == 9
+    insert(32)
+    insert(32)
+  else if c >= 32 and c < 127
+    insert(c)
+  end
+end
+
+saving :: proc(c: Int)
+  if c == 4                              # Ctrl-D: done
+    if line.len() > 0
+      say(line[:].asString(), GRAY)
+    end
+    setLine("")
+    finishSave()
+  else if c == 3
+    setLine("")
+    mode = .typing
+    say("gave up", GRAY)
+  else if c == 13 or c == 9 or (c >= 32 and c < 127)
+    if fileLen == file.len()
+      setLine("")
+      mode = .typing
+      say("too big to save here", RED)
+      return
+    end
+    if c == 13
+      file[fileLen] = 10
+      say(line[:].asString(), GRAY)
+      setLine("")
+    else
+      file[fileLen] = c
+      line.push(c)
+    end
+    fileLen += 1
+  end
+end
+
+# ---------------------------------------------------------------- frames
+
+say("Rinc console: Rio, typed and run", WHITE)
+say("run, ls, load name, run name, save name, delete name, home", GRAY)
+ok := fresh()
+
+update* :: proc()
+  if mode == .running
+    for
+      c := pc.key()
+      if c < 0
+        break
+      end
+      if c == 27
+        mode = .typing
+        say("stopped", GRAY)
+        return
+      end
+      pc.rioType(c)
+    end
+    r := pc.rioFrame()
+    showLog()
+    if r != 0
+      mode = .typing
+      if r == 1
+        say("nothing to run: define update* or draw*", GRAY)
+      else
+        showError()
+      end
+    end
+    return
+  end
+  for
+    c := pc.key()
+    if c < 0 or mode == .running
+      break
+    end
+    if mode == .saving
+      saving(c)
+    else
+      typing(c)
+    end
+  end
+end
+
+draw* :: proc()
+  if mode == .running
+    return                               # (what's running drew)
+  end
+  pc.cls(1)
+  shown: Blob[..256]
+  if mode == .typing
+    if acc.len() == 0
+      shown.pushAll("> ")
+    else
+      shown.pushAll(". ")
+    end
+  end
+  at := shown.len() + cur                # the cursor, in what's shown
+  shown.pushAll(line[:].asString())
+  inputRows := shown.len() / COLS + 1
+  first := max(rowCount + inputRows - ROWS, 0)
+  y := 0
+  for i in first..<rowCount
+    pc.print(rows[i].text[:].asString(), 0, y * 9, rows[i].color)
+    y += 1
+  end
+  for k in 0..<inputRows
+    a := k * COLS
+    pc.print(shown[a:min(a + COLS, shown.len())].asString(), 0, (y + k) * 9, WHITE)
+  end
+  if (pc.time() * 2.0).toInt() % 2 == 0
+    pc.rect(at % COLS * 6, (y + at / COLS) * 9 + 8, 5, 1, WHITE)
+  end
+end

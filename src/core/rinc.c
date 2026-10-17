@@ -47,22 +47,50 @@ static void rinc_hostPrint(rio_Vm *v, rio_Val *a) { /* print(s, x, y, c): text a
   if (!s) return;
   for (i = 0; i < a[1].i; i++, x += 6) rinc_char((unsigned char)s[i], x, y, a[4].i & 255, -1);
 }
-/* key() -> Int: the next character typed (32-126, 13 Enter, 8 Backspace, 27 Esc), or -1 when there's
-   none waiting. The keys also press buttons as they're held: a cart reads whichever it wants */
-static uint8_t rinc_typed[64]; static int rinc_typedHead, rinc_typedTail, rinc_typedEsc;
+/* key() -> Int: the next key typed, or -1 when there's none waiting (docs/spec/input.md#typed-text):
+   printable ASCII, 13 Enter, 8 Backspace, 9 Tab, 27 Esc, Ctrl+letter as 1-26, and editing keys as
+   rinc_Key_*. The keys also press buttons as they're held: an app reads whichever it wants. A nested
+   session (pc.rioStart) has a queue of its own, which its app fills with pc.rioType */
+typedef struct { uint8_t q[64]; int head, tail, esc, escn; } rinc_Text;
+static rinc_Text rinc_typed, rinc_nestTyped;
+static void rinc_queue(rinc_Text *t, int c) {
+  int next = (t->head + 1) % (int)sizeof t->q;
+  if (next != t->tail) { t->q[t->head] = (uint8_t)c; t->head = next; }
+}
+static int rinc_dequeue(rinc_Text *t) {
+  int c;
+  if (t->tail == t->head) return -1;
+  c = t->q[t->tail]; t->tail = (t->tail + 1) % (int)sizeof t->q;
+  return c;
+}
+/* a terminal's bytes: ESC [ (or ESC O) and a letter, or digits and ~, is an editing key */
 void rinc_textPush(int c) {
-  int next = (rinc_typedHead + 1) % (int)sizeof rinc_typed;
-  if (rinc_typedEsc) { if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '~') rinc_typedEsc = 0; else if (rinc_typedEsc == 1 && c != '[' && c != 'O') rinc_typedEsc = 0; else rinc_typedEsc = 2; return; }
-  if (c == 27) { rinc_typedEsc = 1; return; }
+  rinc_Text *t = &rinc_typed;
+  if (t->esc == 1) {
+    if (c == '[' || c == 'O') { t->esc = 2; t->escn = 0; return; }
+    t->esc = 0; rinc_queue(t, 27); /* (a lone ESC: Esc itself, then c) */
+  } else if (t->esc == 2) {
+    int n = t->escn;
+    if (c >= '0' && c <= '9') { t->escn = n * 10 + c - '0'; return; }
+    if (c == ';') { t->escn = 0; return; } /* (modifiers, as in ESC [ 1 ; 5 C: the key's the same) */
+    t->esc = 0;
+    c = c == 'A' ? rinc_Key_up : c == 'B' ? rinc_Key_down : c == 'C' ? rinc_Key_right : c == 'D' ? rinc_Key_left :
+        c == 'H' ? rinc_Key_home : c == 'F' ? rinc_Key_end : c != '~' ? 0 : n == 1 || n == 7 ? rinc_Key_home :
+        n == 4 || n == 8 ? rinc_Key_end : n == 3 ? rinc_Key_delete : n == 5 ? rinc_Key_pageUp : n == 6 ? rinc_Key_pageDown : 0;
+    if (c) rinc_queue(t, c);
+    return;
+  }
+  if (c == 27) { t->esc = 1; return; }
   if (c == '\n') c = 13;
   if (c == 127) c = 8;
-  if (!((c >= 32 && c < 127) || c == 13 || c == 8) || next == rinc_typedTail) return;
-  rinc_typed[rinc_typedHead] = (uint8_t)c; rinc_typedHead = next;
+  if ((c >= 1 && c <= 26) || (c >= 32 && c < 127)) rinc_queue(t, c);
 }
-/* apps, for the launcher (with storage): apps() -> Int looks again and says how many;
+void rinc_textKey(int key) { rinc_typed.esc = 0; if (key > 0 && key < 256) rinc_queue(&rinc_typed, key); }
+int rinc_textRoom(void) { return (int)sizeof rinc_typed.q - 1 - (rinc_typed.head - rinc_typed.tail + (int)sizeof rinc_typed.q) % (int)sizeof rinc_typed.q; }
+/* apps, for home (with storage): apps() -> Int looks again and says how many;
    appName(i, out) -> Int and appInfo(i, out) -> Int copy app i's folder name, or its first line (its
-   comment marker left off: "Title: what it does"), into out, and say how long it is. launch(name) and
-   openConsole() ask the platform to switch, after this frame (rinc_launch) */
+   comment marker left off: "Title: what it does"), into out, and say how long it is. launch(name) asks
+   the platform to switch to an app (or a built-in one: home, console), after this frame */
 const rinc_Fs *rinc_fs;
 int rinc_launch; char rinc_launchName[33];
 static char rinc_appNames[64][33]; static int rinc_appCount;
@@ -114,9 +142,99 @@ static void rinc_hostLaunch(rio_Vm *v, rio_Val *a) {
   if (!s || n < 1 || n >= (int)sizeof rinc_launchName) return;
   memcpy(rinc_launchName, s, (size_t)n); rinc_launchName[n] = 0; rinc_launch = 1;
 }
-static void rinc_hostOpenConsole(rio_Vm *v, rio_Val *a) { (void)v; (void)a; rinc_launch = 2; }
-void rinc_textEsc(void) { int next = (rinc_typedHead + 1) % (int)sizeof rinc_typed; if (next != rinc_typedTail) { rinc_typed[rinc_typedHead] = 27; rinc_typedHead = next; } }
-static void rinc_hostKey(rio_Vm *v, rio_Val *a) { (void)v; if (rinc_typedTail == rinc_typedHead) a[0].i = -1; else { a[0].i = rinc_typed[rinc_typedTail]; rinc_typedTail = (rinc_typedTail + 1) % (int)sizeof rinc_typed; } }
+void rinc_textEsc(void) { rinc_typed.esc = 0; rinc_queue(&rinc_typed, 27); }
+static rio_Vm rinc_nest; static int rinc_nestOn, rinc_nestTried; /* (below: Rio inside an app) */
+static void rinc_hostKey(rio_Vm *v, rio_Val *a) { a[0].i = rinc_dequeue(v == &rinc_nest ? &rinc_nestTyped : &rinc_typed); }
+
+/* apps' sources, for a console or an editor: appSource(name, out) -> Int copies app name's source into
+   out, as much as fits, and gives its whole length (-1: no such app); appSave(name, text) -> Int and
+   appDelete(name) -> Int: 0, or -1 */
+static int rinc_appFile(rio_Vm *v, rio_Val *name, char *path, size_t cap) {
+  const char *s = (const char *)rio_sliceBytes(v, name); int n = (int)name[1].u, i;
+  if (!s || !rinc_fs || n < 1 || n > 32) return 0;
+  for (i = 0; i < n; i++) if (!((s[i] >= 'a' && s[i] <= 'z') || (s[i] >= 'A' && s[i] <= 'Z') || (s[i] >= '0' && s[i] <= '9') || s[i] == '_' || s[i] == '-')) return 0;
+  return snprintf(path, cap, "/rinc/apps/%.*s/%.*s.rio", n, s, n, s) < (int)cap;
+}
+static void rinc_hostAppSource(rio_Vm *v, rio_Val *a) {
+  char path[96], buf[256]; uint8_t *out = (uint8_t *)rio_sliceBytes(v, a + 2); uint32_t cap = a[3].u, total = 0; int got;
+  a[0].i = -1;
+  if (!rinc_appFile(v, a, path, sizeof path) || rinc_fs->open(path, 0)) return;
+  while ((got = rinc_fs->read(buf, sizeof buf)) > 0) {
+    if (out && total < cap) memcpy(out + total, buf, (size_t)got < cap - total ? (size_t)got : cap - total);
+    total += (uint32_t)got;
+  }
+  rinc_fs->close();
+  a[0].i = got < 0 ? -1 : (int32_t)total;
+}
+static void rinc_hostAppSave(rio_Vm *v, rio_Val *a) {
+  char path[96]; const char *text = (const char *)rio_sliceBytes(v, a + 2); int n = (int)a[3].u, bad;
+  a[0].i = -1;
+  if (!rinc_appFile(v, a, path, sizeof path) || rinc_fs->open(path, 1)) return;
+  bad = n > 0 && (!text || rinc_fs->write(text, n) != n);
+  a[0].i = rinc_fs->close() || bad ? -1 : 0;
+}
+static void rinc_hostAppDelete(rio_Vm *v, rio_Val *a) {
+  char path[96];
+  a[0].i = -1;
+  if (!rinc_appFile(v, a, path, sizeof path) || rinc_fs->remove(path)) return;
+  *strrchr(path, '/') = 0; rinc_fs->remove(path); /* (then its folder, if that's empty now) */
+  a[0].i = 0;
+}
+
+/* Rio inside an app (docs/spec/rio.md): one session at a time, a REPL in memory the app hands over.
+   rioStart(mem, tables) -> Int: a fresh one, its code and data in mem and its compiler's tables in
+   tables (0, or -1); rioEval(text) -> Int: compile and run a piece (0 done, 1 unfinished: it needs more,
+   -1 an error); rioFrame() -> Int: its update then draw (0, 1 if it has neither, -1 an error);
+   rioType(key): a key for its pc.key(); rioError(out) -> Int and rioLog(out) -> Int: the last error, and
+   what it has logged since (taken), as text; rioIndent(text) -> Int: the indent steps an unfinished
+   input's next line takes. The session has pc too, but not a session of its own */
+static char rinc_nestLog[2048]; static int rinc_nestLogLen;
+static void rinc_nestLogLine(void *ud, const char *s, int n) {
+  (void)ud;
+  if (n > (int)sizeof rinc_nestLog - 1 - rinc_nestLogLen) n = (int)sizeof rinc_nestLog - 1 - rinc_nestLogLen; /* (full: the rest is lost) */
+  if (n < 0) return;
+  memcpy(rinc_nestLog + rinc_nestLogLen, s, (size_t)n); rinc_nestLogLen += n;
+  rinc_nestLog[rinc_nestLogLen++] = '\n';
+}
+static int rinc_copyText(rio_Vm *v, rio_Val *out, const char *s, int n) {
+  char *p = (char *)rio_sliceBytes(v, out); int cap = (int)out[1].u;
+  if (n > cap) n = cap;
+  if (p && n > 0) memcpy(p, s, (size_t)n);
+  return p ? n : 0;
+}
+#ifdef rio_NO_COMPILER /* (a vm that only runs images, as the web player's: no sessions, nothing to compile) */
+static int rinc_noCompiler(void) { return -1; }
+#define rio_replBegin(vm, scratch, size, lim) rinc_noCompiler()
+#define rio_replEval(vm, src, len) rinc_noCompiler()
+#define rio_replIndent(src, len) 0
+#define rio_compile(vm, src, len) rinc_noCompiler()
+#endif
+static void rinc_hostRioStart(rio_Vm *v, rio_Val *a) {
+  uint8_t *mem = (uint8_t *)rio_sliceBytes(v, a), *tables = (uint8_t *)rio_sliceBytes(v, a + 2);
+  a[0].i = -1;
+  rinc_nestOn = rinc_nestLogLen = 0; rinc_nestTried = 1;
+  memset(&rinc_nestTyped, 0, sizeof rinc_nestTyped);
+  if (v == &rinc_nest || !mem || !tables || rio_init(&rinc_nest, mem, a[1].u, 0, 0)) return;
+  rio_setLog(&rinc_nest, rinc_nestLogLine, 0);
+  if (rinc_hostProcs(&rinc_nest) || rio_autoImport(&rinc_nest, "pc") || rio_replBegin(&rinc_nest, tables, a[3].u, 0)) return;
+  rinc_nestOn = 1; a[0].i = 0;
+}
+static void rinc_hostRioEval(rio_Vm *v, rio_Val *a) {
+  const char *s = (const char *)rio_sliceBytes(v, a);
+  a[0].i = v != &rinc_nest && rinc_nestOn && s ? rio_replEval(&rinc_nest, s, a[1].u) : -1;
+}
+static void rinc_hostRioFrame(rio_Vm *v, rio_Val *a) { a[0].i = v != &rinc_nest && rinc_nestOn ? rinc_frame(&rinc_nest) : -1; }
+static void rinc_hostRioType(rio_Vm *v, rio_Val *a) { if (v != &rinc_nest && a[0].i > 0 && a[0].i < 256) rinc_queue(&rinc_nestTyped, a[0].i); }
+static void rinc_hostRioError(rio_Vm *v, rio_Val *a) {
+  const char *e = rinc_nestOn || rinc_nestTried ? rio_error(&rinc_nest) : "no session (pc.rioStart starts one)";
+  a[0].i = v == &rinc_nest ? 0 : rinc_copyText(v, a, e, (int)strlen(e));
+}
+static void rinc_hostRioLog(rio_Vm *v, rio_Val *a) {
+  int n = v == &rinc_nest ? 0 : rinc_copyText(v, a, rinc_nestLog, rinc_nestLogLen);
+  memmove(rinc_nestLog, rinc_nestLog + n, (size_t)(rinc_nestLogLen - n)); rinc_nestLogLen -= n;
+  a[0].i = n;
+}
+static void rinc_hostRioIndent(rio_Vm *v, rio_Val *a) { const char *s = (const char *)rio_sliceBytes(v, a); a[0].i = s ? rio_replIndent(s, a[1].u) : 0; }
 static void rinc_hostBtn(rio_Vm *v, rio_Val *a) { (void)v; a[0].i = a[0].u < 16 ? rinc_buttons >> a[0].i & 1 : 0; }
 /* stick(i) -> Float: 0 the left stick's x, 1 its y, 2 and 3 the right one's; -1 to 1, + right and down,
    0 when it's near the middle (it gets there on its own only roughly). trigger(i) -> Float: 0 left, 1
@@ -132,8 +250,8 @@ static void rinc_hostStick(rio_Vm *v, rio_Val *a) { (void)v; a[0].f = a[0].u < 4
 static void rinc_hostTrigger(rio_Vm *v, rio_Val *a) { (void)v; a[0].f = a[0].u < 2 ? (float)rinc_axes[4 + a[0].i] / 32767.0f : 0; }
 static void rinc_hostTime(rio_Vm *v, rio_Val *a) { (void)v; a[0].f = rinc_time ? rinc_time() : 0; }
 /* fromHex(out, text): bytes from hex digits (pairs; anything else between them, such as spaces and
-   line breaks, is skipped) into out, until it's full. Returns how many. For binary data typed into a
-   cart: sound, pictures */
+   line breaks, is skipped) into out, until it's full. Returns how many. For binary data typed into an
+   app: sound, pictures */
 static int rinc_hexDigit(int c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1; }
 static void rinc_hostFromhex(rio_Vm *v, rio_Val *a) {
   uint8_t *out = (uint8_t *)rio_sliceBytes(v, a); const char *t = (const char *)rio_sliceBytes(v, a + 2);
@@ -155,8 +273,37 @@ int rinc_start(rio_Vm *vm, void *mem, uint32_t memsize, void (*put)(const char *
   rinc_audioReset();
   rio_setLog(vm, rinc_logLine, 0);
   if (rinc_hostProcs(vm) || rio_autoImport(vm, "pc")) return -1; /* (pc.cls and so on, everywhere) */
-  rinc_typedHead = rinc_typedTail = rinc_typedEsc = 0;
+  memset(&rinc_typed, 0, sizeof rinc_typed);
+  rinc_nestOn = rinc_nestTried = 0; /* (a session lives in an app's memory, which is starting over) */
   return 0;
+}
+
+int rinc_compile(rio_Vm *vm, void *space, uint32_t size, const char *src, uint32_t len) {
+  char *at = (char *)space + size - len;
+  (void)vm; /* (unused without a compiler) */
+  if (len > rinc_MAX_SOURCE || len > size) return 1;
+  if (src != at) memmove(at, src, len);
+  return rio_compile(vm, at, len) ? -1 : 0;
+}
+
+int rinc_atLimit(const char *e) { return strstr(e, "out of") || strstr(e, "too many") || strstr(e, "too complex") || strstr(e, "too deep"); }
+
+int rinc_systemKey(int sysDown, int shiftDown, int otherDown) {
+  /* Shift as the system key: tapped (pressed and let go with nothing else), then pressed again within
+     0.4 s and held. shift: 0 nothing yet, 1 the tap's press, 2 tapped, 3 held as the system key */
+  static int shift, frames, wasShift, wasDown, combo;
+  int down;
+  if (frames < 1000) frames++;
+  if (shiftDown && !wasShift) { shift = shift == 2 && frames <= 24 ? 3 : 1; frames = 0; }
+  else if (!shiftDown && wasShift) { shift = shift == 1 && frames <= 24 ? 2 : 0; frames = 0; }
+  else if (shift == 1 && otherDown) shift = 0; /* (Shift held for typing capitals) */
+  wasShift = shiftDown;
+  down = sysDown || shift == 3;
+  if (down && otherDown) combo = 1; /* (a combination: for something else, not home) */
+  if (down || !wasDown) { wasDown = down; return 0; }
+  wasDown = 0;
+  if (combo) { combo = 0; return 0; }
+  return 1;
 }
 
 int rinc_hostProcs(rio_Vm *vm) {
@@ -164,7 +311,12 @@ int rinc_hostProcs(rio_Vm *vm) {
          rio_addFfi(vm, "pc.rect", "iiiii", rinc_hostRect) || rio_addFfi(vm, "pc.print", "siii", rinc_hostPrint) || rio_addFfi(vm, "pc.btn", "i>i", rinc_hostBtn) || rinc_audioProcs(vm) || rio_addFfi(vm, "pc.time", ">f", rinc_hostTime) ||
          rio_addFfi(vm, "pc.fromHex", "bs>i", rinc_hostFromhex) || rio_addFfi(vm, "pc.stick", "i>f", rinc_hostStick) || rio_addFfi(vm, "pc.trigger", "i>f", rinc_hostTrigger) ||
          rio_addFfi(vm, "pc.key", ">i", rinc_hostKey) || rio_addFfi(vm, "pc.apps", ">i", rinc_hostApps) || rio_addFfi(vm, "pc.appName", "ib>i", rinc_hostAppName) ||
-         rio_addFfi(vm, "pc.appInfo", "ib>i", rinc_hostAppInfo) || rio_addFfi(vm, "pc.launch", "s", rinc_hostLaunch) || rio_addFfi(vm, "pc.openConsole", "", rinc_hostOpenConsole);
+         rio_addFfi(vm, "pc.appInfo", "ib>i", rinc_hostAppInfo) || rio_addFfi(vm, "pc.launch", "s", rinc_hostLaunch) ||
+         rio_addFfi(vm, "pc.appSource", "sb>i", rinc_hostAppSource) || rio_addFfi(vm, "pc.appSave", "ss>i", rinc_hostAppSave) ||
+         rio_addFfi(vm, "pc.appDelete", "s>i", rinc_hostAppDelete) || rio_addFfi(vm, "pc.rioStart", "bb>i", rinc_hostRioStart) ||
+         rio_addFfi(vm, "pc.rioEval", "s>i", rinc_hostRioEval) || rio_addFfi(vm, "pc.rioFrame", ">i", rinc_hostRioFrame) ||
+         rio_addFfi(vm, "pc.rioType", "i", rinc_hostRioType) || rio_addFfi(vm, "pc.rioError", "b>i", rinc_hostRioError) ||
+         rio_addFfi(vm, "pc.rioLog", "b>i", rinc_hostRioLog) || rio_addFfi(vm, "pc.rioIndent", "s>i", rinc_hostRioIndent);
 }
 
 /* a game's frame: update then draw */
@@ -190,7 +342,7 @@ int rinc_frame(rio_Vm *vm) {
    typed, and Backspace in the indent takes a step.
    Keys arrive as a terminal sends them (ESC [ A and so on: the keyboard sends the same), and the echo
    is in terminal escapes too, which the console understands, so a serial terminal and the screen show
-   the same. Typing at the end of the line, the usual case (and all of a pasted cart), sends little
+   the same. Typing at the end of the line, the usual case (and all of a pasted app), sends little
    more than what's typed: a word takes its color as soon as it is one (the end of the line ends it,
    for now), recolored as it changes. Edits elsewhere redraw the line. */
 #define rinc_PAINT_KEYWORD "\033[38;5;12m" /* (PICO-8 colors by number: blue) */
@@ -423,7 +575,7 @@ static int rinc_command(rinc_Repl *r) {
   while (n && s[n - 1] == ' ') n--;
   while (n && *s == ' ') { s++; n--; }
   for (w = 0; w < n && s[w] != ' '; w++) {}
-  if (w == 4 && n == 4 && !memcmp(s, "home", 4)) { rinc_launch = 3; return 1; } /* (the platform goes back to the launcher) */
+  if (w == 4 && n == 4 && !memcmp(s, "home", 4)) { memcpy(rinc_launchName, "home", 5); rinc_launch = 1; return 1; } /* (the platform goes back to it) */
   if (w == 2 && n == 2 && !memcmp(s, "ls", 2)) {
     if (!rinc_fs) rinc_say(r, "no storage\r\n");
     else if (rinc_findApps() < 0) rinc_say(r, "no apps (or no card): /rinc/apps\r\n");

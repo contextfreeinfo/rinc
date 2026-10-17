@@ -1,7 +1,7 @@
 # Builds and tests on every push and pull request:
 #   web      the VM-only web player (rinc.wasm), with zig: only CI needs zig
 #   desktop  rinc for Windows, macOS (universal) and Linux, with the web player built in, so rinc -web
-#            and rinc -export work without anything else installed; tests run every cart headless
+#            and rinc -export work without anything else installed; tests run every app headless
 #   board    rinc.uf2 for the Fruit Jam, with the Pico SDK and Arm's toolchain
 # A tag like v0.1.0 also publishes all of them as a GitHub release. Each night (if main changed since
 # the last one), and whenever it's run by hand (Actions > ci > Run workflow), they go to the rolling

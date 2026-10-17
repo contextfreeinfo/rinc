@@ -154,9 +154,10 @@ void tuh_mount_cb(uint8_t dev) {
 }
 void tuh_umount_cb(uint8_t dev) { rinc_note("[usb] device %u gone\r\n", dev, 0, 0); }
 
+void rinc_keyboardPoll(void) { tuh_task(); rinc_padTask(); }
 int rinc_keyboardChar(void) {
   int c;
-  tuh_task(); rinc_padTask();
+  rinc_keyboardPoll();
   if (rinc_repeatKey && time_us_64() >= rinc_repeatAt) {
     int r = rinc_editing(rinc_repeatKey) ? -1 : rinc_character(rinc_repeatKey, rinc_repeatMods);
     if (r >= 0) rinc_push(r);

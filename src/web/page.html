@@ -17,7 +17,7 @@ canvas { position: absolute; inset: 0; margin: auto; image-rendering: pixelated;
 (async () => {
   const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
   const canvas = document.querySelector("canvas"), ctx = canvas.getContext("2d"), image = ctx.createImageData(320, 240);
-  const err = document.getElementById("err"), t0 = performance.now(), cart = b64("{{CART}}");
+  const err = document.getElementById("err"), t0 = performance.now(), app = b64("{{APP}}");
   let ex, out = "";
   const text = (p, n) => new TextDecoder().decode(new Uint8Array(ex.memory.buffer, p, n));
   const fail = p => { const m = new Uint8Array(ex.memory.buffer, p); err.textContent = text(p, m.indexOf(0)); err.hidden = false; };
@@ -27,9 +27,9 @@ canvas { position: absolute; inset: 0; margin: auto; image-rendering: pixelated;
   };
   ex = (await WebAssembly.instantiate(b64("{{WASM}}"), { env })).instance.exports;
   ex._initialize();
-  new Uint8Array(ex.memory.buffer, ex.source(), cart.length).set(cart);
+  new Uint8Array(ex.memory.buffer, ex.source(), app.length).set(app);
   const draw = () => { image.data.set(new Uint8Array(ex.memory.buffer, ex.pixels(), 320 * 240 * 4)); ctx.putImageData(image, 0, 0); };
-  if (ex.start(cart.length)) { draw(); fail(ex.error()); return; }
+  if (ex.start(app.length)) { draw(); fail(ex.error()); return; }
   // sound: an AudioWorklet plays what the wasm mixes, kept about 60 ms ahead of the audio clock.
   // Browsers start sound only after a key or a click; until then a frame's sound is mixed and dropped
   const worklet = `class Rinc extends AudioWorkletProcessor {

@@ -1,4 +1,4 @@
-# timings on the board: paste into the REPL, or run as a cart
+# timings on the board: paste into the REPL, or run as an app
 P :: struct
   x: Float
   y: Float

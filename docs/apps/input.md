@@ -38,7 +38,7 @@ controller they're 0. The left stick pushed well over also presses the arrow but
 
 `pc.key()` gives the next character typed, or -1 when there's none: for names, chat or a typed-in
 command. It's the printable ASCII characters, 13 for Enter, 8 for Backspace and 27 for Esc. Keys held
-down still press buttons too, so a cart can use either.
+down still press buttons too, so an app can use either.
 
 ```rio
 name: Blob[..16]

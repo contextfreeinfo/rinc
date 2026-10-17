@@ -1,7 +1,7 @@
 # Sound
 
 A Rinc mixes 8 voices, numbered 0 to 7, into 48,000 frames a second of 16-bit stereo. Each voice plays
-sound data straight from the cart's memory, reading it as it plays.
+sound data straight from the app's memory, reading it as it plays.
 
 ## The procs
 

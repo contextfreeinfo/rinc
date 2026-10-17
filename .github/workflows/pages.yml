@@ -1,5 +1,5 @@
-# The carts as web pages, on GitHub Pages (rincpc.com): each push to main builds the web player and a
-# headless rinc, makes a page of each cart (rinc -web), and an index linking them, from each cart's first
+# The apps as web pages, on GitHub Pages (rincpc.com): each push to main builds the web player and a
+# headless rinc, makes a page of each app (rinc -web), and an index linking them, from each app's first
 # comment line, and the docs (mdbook, from docs/) under /docs.
 name: pages
 
@@ -37,16 +37,16 @@ jobs:
           mkdir -p site
           {
             echo '<!doctype html><html lang="en"><head><meta charset="utf-8">'
-            echo '<meta name="viewport" content="width=device-width, initial-scale=1"><title>Rinc carts</title>'
+            echo '<meta name="viewport" content="width=device-width, initial-scale=1"><title>Rinc apps</title>'
             echo '<style>body{margin:0;padding:24px 16px;background:#1d2b53;color:#fff1e8;font:16px/1.5 ui-monospace,monospace}'
             echo 'main{max-width:720px;margin:auto}a{color:#ffec27}h1{font-size:22px}li{margin:10px 0}p{color:#c2c3c7}</style>'
-            echo '</head><body><main><h1>Rinc carts</h1>'
-            echo '<p>Rinc carts, playing in the browser: the same Rio VM as on the board and the desktop. Arrows and V C X Z, or a controller. <a href="docs/">Docs</a>: making carts, and what a Rinc provides.</p><ul>'
-            for cart in carts/*.rio; do
-              name=$(basename "$cart" .rio)
+            echo '</head><body><main><h1>Rinc apps</h1>'
+            echo '<p>Rinc apps, playing in the browser: the same Rio VM as on the board and the desktop. Arrows and V C X Z, or a controller. <a href="docs/">Docs</a>: making apps, and what a Rinc provides.</p><ul>'
+            for app in apps/*.rio; do
+              name=$(basename "$app" .rio)
               case $name in bench|micro) continue;; esac # (timings, not demos)
-              build/rinc "$cart" -web "site/$name.html"
-              about=$(head -1 "$cart" | sed -e 's/^# *//' -e 's/&/\&amp;/g' -e 's/</\&lt;/g')
+              build/rinc "$app" -web "site/$name.html"
+              about=$(head -1 "$app" | sed -e 's/^# *//' -e 's/&/\&amp;/g' -e 's/</\&lt;/g')
               echo "<li><a href=\"$name.html\">$name</a>: $about</li>"
             done
             echo '</ul><p><a href="docs/">Docs</a> &middot; <a href="https://github.com/rincpc/rinc">Source</a></p></main></body></html>'

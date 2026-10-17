@@ -1,5 +1,5 @@
 # The docs as a web site: mdbook build docs (into docs/book). SUMMARY.md sets the order. The pages
-# workflow puts it at rincpc.com/docs, next to the demo carts.
+# workflow puts it at rincpc.com/docs, next to the demo apps.
 [book]
 title = "Rinc"
 src = "."

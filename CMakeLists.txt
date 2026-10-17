@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.13)
 
 # Rinc OS. One project, two builds:
 #   RINC_PLATFORM=rp2350   the Adafruit Fruit Jam, with the Pico SDK (the default when PICO_SDK_PATH is set)
-#   RINC_PLATFORM=desktop  a native build, for working on the shared code and carts
+#   RINC_PLATFORM=desktop  a native build, for working on the shared code and apps
 # RIO_DIR picks the rio checkout: the lib/rio submodule by default, or a working copy while developing both.
 set(RIO_DIR ${CMAKE_CURRENT_LIST_DIR}/lib/rio CACHE PATH "rio checkout to build against")
 if(NOT PICO_SDK_PATH AND DEFINED ENV{PICO_SDK_PATH})
@@ -44,6 +44,16 @@ target_link_libraries(rinccore PUBLIC riocore)
 if(NOT MSVC)
   target_compile_options(rinccore PRIVATE -Wall -Wextra)
 endif()
+# the built-in apps, ordinary apps built in (apps.c): home, where the board starts, and the console
+foreach(app home console)
+  set(src ${CMAKE_CURRENT_BINARY_DIR}/${app}_src.c)
+  add_custom_command(OUTPUT ${src}
+    COMMAND ${CMAKE_COMMAND} -DIN=${CMAKE_CURRENT_LIST_DIR}/system/${app}.rio -DOUT=${src} -DNAME=rinc_${app}Src
+      -P ${CMAKE_CURRENT_LIST_DIR}/tools/embed_text.cmake
+    DEPENDS system/${app}.rio tools/embed_text.cmake)
+  target_sources(rinccore PRIVATE ${src})
+endforeach()
+target_sources(rinccore PRIVATE src/core/apps.c)
 
 if(RINC_PLATFORM STREQUAL rp2350)
   target_compile_definitions(riocore PUBLIC rio_SMALL rio_MAX_FFI=64) # MCU-sized fixed caps, but room for Rinc's host procs
@@ -60,13 +70,6 @@ if(RINC_PLATFORM STREQUAL rp2350)
     lib/fatfs/ff.c lib/fatfs/ffunicode.c
     ${TUSB}/host/usbh.c ${TUSB}/host/hub.c ${TUSB}/class/hid/hid_host.c ${TUSB}/portable/raspberrypi/pio_usb/hcd_pio_usb.c)
   target_include_directories(rinc BEFORE PRIVATE src/rp2350 lib/fatfs) # (sd.c: the SD card, through FatFs)
-  # the launcher, a cart built in: where the board starts
-  set(launcher ${CMAKE_CURRENT_BINARY_DIR}/launcher_src.c)
-  add_custom_command(OUTPUT ${launcher}
-    COMMAND ${CMAKE_COMMAND} -DIN=${CMAKE_CURRENT_LIST_DIR}/system/launcher.rio -DOUT=${launcher} -DNAME=rinc_launcherSrc
-      -P ${CMAKE_CURRENT_LIST_DIR}/tools/embed_text.cmake
-    DEPENDS system/launcher.rio tools/embed_text.cmake)
-  target_sources(rinc PRIVATE ${launcher})
   target_compile_definitions(rinc PRIVATE PICO_STACK_SIZE=0x1000 PICO_CORE1_STACK_SIZE=0x800)
   pico_generate_pio_header(rinc ${CMAKE_CURRENT_LIST_DIR}/src/rp2350/i2s.pio) # audio.c: sound out of the 3.5 mm jack
   target_link_libraries(rinc PRIVATE rinccore pico_stdlib pico_multicore hardware_dma hardware_irq hardware_clocks hardware_pio hardware_i2c hardware_spi
@@ -114,21 +117,29 @@ else()
     target_compile_definitions(rinc PRIVATE rinc_WEB=1)
   endif()
 
-  # tests: every cart runs headless for a few seconds; a cart exported runs the same; with the web
+  # tests: every app runs headless for a few seconds; an app exported runs the same; with the web
   # player, a page gets made
   enable_testing()
-  file(GLOB carts ${CMAKE_CURRENT_LIST_DIR}/carts/*.rio)
-  foreach(cart ${carts})
-    get_filename_component(name ${cart} NAME_WE)
-    add_test(NAME cart_${name} COMMAND rinc ${cart} -frames 180 -o ${CMAKE_CURRENT_BINARY_DIR}/${name}.ppm)
+  file(GLOB apps ${CMAKE_CURRENT_LIST_DIR}/apps/*.rio)
+  foreach(app ${apps})
+    get_filename_component(name ${app} NAME_WE)
+    add_test(NAME app_${name} COMMAND rinc ${app} -frames 180 -o ${CMAKE_CURRENT_BINARY_DIR}/${name}.ppm)
   endforeach()
+  # the built-in apps: home runs, and the console, typed at, runs Rio and its commands
+  add_test(NAME app_home COMMAND rinc -app home -frames 30)
+  add_test(NAME app_console COMMAND rinc -app console -frames 60
+    -type "x := 6 * 7\\nsq :: proc(n: Int) -> Int\\nreturn n * n\\nend\\nsq(x)\\nnope\\nls\\n")
+  set_tests_properties(app_console PROPERTIES PASS_REGULAR_EXPRESSION "1764[\r\n]+> nope[\r\n]+1:1: undefined name")
+  # an app's memory: the -m report
+  add_test(NAME memory_report COMMAND rinc ${CMAKE_CURRENT_LIST_DIR}/apps/chord.rio -m)
+  set_tests_properties(memory_report PROPERTIES PASS_REGULAR_EXPRESSION "fits in the 256 KB app space")
   set(game ${CMAKE_CURRENT_BINARY_DIR}/breakout-game${CMAKE_EXECUTABLE_SUFFIX})
-  add_test(NAME export_native COMMAND rinc ${CMAKE_CURRENT_LIST_DIR}/carts/breakout.rio -export ${game})
+  add_test(NAME export_native COMMAND rinc ${CMAKE_CURRENT_LIST_DIR}/apps/breakout.rio -export ${game})
   add_test(NAME export_native_runs COMMAND ${game} -frames 180 -o ${CMAKE_CURRENT_BINARY_DIR}/breakout-game.ppm)
   set_tests_properties(export_native_runs PROPERTIES DEPENDS export_native)
-  # (the exported game draws exactly what rinc does running the cart)
+  # (the exported game draws exactly what rinc does running the app)
   add_test(NAME export_native_same COMMAND ${CMAKE_COMMAND} -E compare_files ${CMAKE_CURRENT_BINARY_DIR}/breakout.ppm ${CMAKE_CURRENT_BINARY_DIR}/breakout-game.ppm)
-  set_tests_properties(export_native_same PROPERTIES DEPENDS "export_native_runs;cart_breakout")
+  set_tests_properties(export_native_same PROPERTIES DEPENDS "export_native_runs;app_breakout")
   # every rio example in the docs, run by a headless rinc (with Rio's runner, once lib/rio has it)
   find_package(Python3 COMPONENTS Interpreter)
   if(Python3_FOUND AND EXISTS ${RIO_DIR}/tests/docs.py)
@@ -142,6 +153,6 @@ else()
   add_test(NAME pc_declared COMMAND rinc_pc_test ${CMAKE_CURRENT_LIST_DIR}/src/core/pc.rio)
   set_tests_properties(pc_declared PROPERTIES PASS_REGULAR_EXPRESSION "pc.rio declares all [0-9]+ host procs")
   if(RINC_WEB_WASM)
-    add_test(NAME export_web COMMAND rinc ${CMAKE_CURRENT_LIST_DIR}/carts/breakout.rio -web ${CMAKE_CURRENT_BINARY_DIR}/breakout.html)
+    add_test(NAME export_web COMMAND rinc ${CMAKE_CURRENT_LIST_DIR}/apps/breakout.rio -web ${CMAKE_CURRENT_BINARY_DIR}/breakout.html)
   endif()
 endif()

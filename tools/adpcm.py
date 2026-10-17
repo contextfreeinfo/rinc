@@ -75,7 +75,7 @@ def read_wav(path):
   return [list(pcm[c::nch]) for c in range(nch)], rate
 
 def tone():
-  """a plucked A minor chord, half a second at 22050 a second, mono (small enough to type into a cart)"""
+  """a plucked A minor chord, half a second at 22050 a second, mono (small enough to type into an app)"""
   rate, n = 22050, 11025
   s = [0.0] * n
   for k, f in enumerate([220.0, 261.63, 329.63, 440.0]):

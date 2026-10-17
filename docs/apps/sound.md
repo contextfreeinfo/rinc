@@ -1,7 +1,7 @@
 # Sound
 
-Rinc plays sound on 8 voices, numbered 0 to 7. A voice plays bytes from the cart's own memory, at
-whatever rate it's told, so a cart can make sound by computing it, or carry recorded sound as data.
+Rinc plays sound on 8 voices, numbered 0 to 7. A voice plays bytes from the app's own memory, at
+whatever rate it's told, so an app can make sound by computing it, or carry recorded sound as data.
 
 ```rio
 wave: Blob[2048]
@@ -31,8 +31,8 @@ The voice reads the bytes as it plays, so they have to stay put: keep sound in g
 ## Recorded sound
 
 IMA ADPCM keeps sound in a quarter of the space of 16-bit, and sounds close to it: a second of 22 kHz
-mono is 11 KB. `tools/adpcm.py` turns a 16-bit WAV file into Rio source for a cart, which `pc.fromHex`
-reads into a `Blob` (see `carts/chord.rio`). `pc.soundWav(voice, data)` plays a whole WAV file's bytes,
+mono is 11 KB. `tools/adpcm.py` turns a 16-bit WAV file into Rio source for an app, which `pc.fromHex`
+reads into a `Blob` (see `apps/chord.rio`). `pc.soundWav(voice, data)` plays a whole WAV file's bytes,
 16-bit or ADPCM, at its own rate.
 
-Next: [apps and the launcher](apps.md).
+Next: [apps and home](apps.md).

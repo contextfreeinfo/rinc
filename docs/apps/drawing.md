@@ -44,7 +44,7 @@ log(cube(5, 5, 5))
 ## Pictures as data
 
 Rinc has no sprite format of its own: a picture is just bytes, one color number each, drawn with
-`pset`. `hexBlob` writes them in the cart:
+`pset`. `hexBlob` writes them in the app:
 
 ```rio
 heart := hexBlob("
