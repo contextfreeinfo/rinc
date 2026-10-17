@@ -64,7 +64,9 @@ log(pc.pget(101, 100), pc.pget(100, 100))
 ```
 
 ```output
-8 0
+8 1
 ```
+
+(The 1 is the screen's dark blue, from before anything was drawn there.)
 
 Next: [input](input.md).

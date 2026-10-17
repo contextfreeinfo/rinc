@@ -117,9 +117,9 @@ draw* :: proc()
   pc.print(text[:].asString(), 4, 4, 7)
   if left == 0
     pc.print("YOU WIN!  V to play again", 85, 120, 11)
-  else if lives == 0
+  case lives == 0
     pc.print("GAME OVER  V to play again", 82, 120, 8)
-  else if serving
+  case serving
     pc.print("V to serve", 130, 150, 6)
   end
 end

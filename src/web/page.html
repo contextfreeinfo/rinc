@@ -129,7 +129,7 @@ canvas { position: absolute; inset: 0; margin: auto; image-rendering: pixelated;
   addEventListener("keydown", startAudio); addEventListener("pointerdown", startAudio);
   // btn: arrows, then A (V), B (C), X (X), Y (Z)
   const keys = { ArrowLeft: 1, ArrowRight: 2, ArrowUp: 4, ArrowDown: 8, KeyV: 16, KeyC: 32, KeyX: 64, KeyZ: 128 };
-  let buttons = 0, next = performance.now(), game = true;
+  let buttons = 0, next = performance.now();
   // a controller, in the browser's standard layout (Xbox's): its buttons as Rinc's, sticks and triggers
   const padBits = [16, 32, 64, 128, 256, 512, 0, 0, 8192, 4096, 1024, 2048, 4, 8, 1, 2];
   const pad = { back: false, guide: false };
@@ -169,16 +169,16 @@ canvas { position: absolute; inset: 0; margin: auto; image-rendering: pixelated;
     return (shift ? 1 : 0) | (other ? 2 : 0) | (held.has("Escape") || pad.back ? 4 : 0) | (pad.guide ? 8 : 0);
   };
   const tick = now => {
-    while (game && now >= next) { // 60 frames a second, whatever the display's rate
-      const b = buttons | gamepad(), r = ex.frame(b, systemKeys(pad));
-      if (r) { game = false; if (r < 0) fail(ex.error()); }
+    while (now >= next) { // 60 frames a second, whatever the display's rate (and on after an app stops or
+      // fails, its error on the screen, so the system key still goes home)
+      ex.frame(buttons | gamepad(), systemKeys(pad));
       if (!node) mixed(800); // (no sound yet: keep time anyway)
       next += 1000 / 60;
       if (now - next > 100) next = now;
     }
     if (node) feed();
     draw();
-    if (game) requestAnimationFrame(tick);
+    requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
 })();
