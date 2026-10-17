@@ -6,7 +6,9 @@ cmake --build build-desktop --config Release
 ```
 
 The result is one program, with SDL3 (and, with MSVC, the C runtime) linked in. `-DRINC_SDL=OFF` builds
-it without a window.
+it without a window. A release is that one program, zipped on Windows and a `.tar.gz` on macOS and Linux (x86-64, and
+arm64 for a Raspberry Pi 4 or 5 with 64-bit Raspberry Pi OS), so `rinc -help` and `rinc -license`
+carry what would otherwise be files beside it.
 
 ```
 rinc app.rio                      play, in a window (closing it quits)
@@ -23,8 +25,9 @@ rinc app.rio -i app.img           compile to an image, and list the host procs i
 rinc a.rio b.rio -export game     a program to hand out (game.exe on Windows): rinc with the apps in it
   -home a                         the one it starts at (by default the only one, or one named home)
   -name folder                    its storage folder's name (by default its home app's)
-  -runner rinc-linux-x86_64       a copy of that rinc instead, such as another system's from a release
+  -runner path/to/rinc            a copy of that rinc instead, such as another system's from a release
 rinc a.rio b.rio -web game.html   a page that plays them (see the web)
+rinc -help                        all this; and rinc -license, the licenses of what's in it
 ```
 
 In a window, the arrows and V, C, X and Z are the buttons, any controller SDL knows is player 1 (Xbox,

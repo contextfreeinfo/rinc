@@ -84,7 +84,7 @@ if(RINC_PLATFORM STREQUAL rp2350)
     add_custom_target(flash COMMAND picotool load -f -x $<TARGET_FILE:rinc> DEPENDS rinc USES_TERMINAL)
   endif()
 else()
-  add_executable(rinc src/desktop/main.c src/desktop/files.c)
+  add_executable(rinc src/desktop/main.c src/desktop/files.c src/desktop/about.c)
   target_link_libraries(rinc PRIVATE rinccore)
   # the window: SDL3, built from source here and linked in statically, for a single binary
   option(RINC_SDL "a window, through SDL3 (off: headless only)" ON)

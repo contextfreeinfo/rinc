@@ -12,9 +12,10 @@ git clone --recursive https://github.com/rincpc/rinc     # (or: git submodule up
   [the Fruit Jam](fruit-jam.md).
 - **The desktop:** `cmake -S . -B build-desktop -DRINC_PLATFORM=desktop && cmake --build build-desktop
   --config Release`. See [the desktop](desktop.md).
-- **The web:** `python tools/web.py --wasm=rinc.wasm --wasm-full=rinc-full.wasm`, with zig. See [the web](web.md).
+- **The web:** `python tools/web.py --wasm=rinc.wasm --wasm-full=rinc-full.wasm`, with zig. See
+  [the web](web.md).
 
-Prebuilt desktop programs, web player and firmware are in the
+Prebuilt desktop programs (each just the one program, zipped), web players and firmware are in the
 [nightly release](https://github.com/rincpc/rinc/releases/tag/nightly).
 
 ## Source layout

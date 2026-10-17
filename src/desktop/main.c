@@ -1,25 +1,7 @@
-/* Rinc on the desktop:
-     rinc                       a Rio REPL in the terminal
-     rinc app.rio               run an app in a window: its top-level code and main, then update* and
-                               draw* 60 times a second if it's a game (arrows, V C X Z: btn; Shift
-                               tapped then held, with Esc: home; closing the window quits)
-     -frames n                 instead of a window, run n frames (A held for the first few)
-     -o screen.ppm             instead of a window, afterwards write the screen as an image
-     -wav sound.wav            with -frames: the sound those frames made, as a WAV file
-     -i app.img                compile to an image (see rio_loadImage) instead, and list the host
-                               procs its code calls
-     -export game[.exe]        a copy of this rinc with the app in it, compiled: it runs the app
-                               (with the options above, too), so it's a game to hand out
-     -runner rinc-linux-x86_64  with -export: copy that rinc instead (another system's, say, from a
-                               release), for a game for that system
-     -web game.html            one page that plays the app in a browser: the web player (built in
-                               when RINC_WEB_WASM is set; with the compiler, from RINC_WEB_WASM_FULL,
-                               if an app runs Rio itself) with the app, compiled, all inline
-     -m                        how near the app comes to its limits, compiling and running (as on
-                               every Rinc), instead of running it
-     -app console              a built-in app instead of a file: home or console (pc.launch
-                               switches to these too)
-     -type text                type this, as fast as the app takes it (\n Enter, \e Esc, \t Tab)
+/* Rinc on the desktop: apps in a window (or headless, for tests), a REPL in the terminal, and apps
+   bundled into programs (-export) and web pages (-web). rinc -help (about.c) says how. -web gives a page
+   the VM-only web player (built in when RINC_WEB_WASM is set), or, if an app runs Rio itself, the one
+   with the compiler (RINC_WEB_WASM_FULL).
    The app space is 256 KB, as on the Fruit Jam and the web, so an app that fits one fits all three.
    The window is SDL3, linked in statically (rinc_SDL, on by default). */
 #define _CRT_SECURE_NO_WARNINGS
@@ -460,10 +442,15 @@ static int rinc_window(const char *title) {
 }
 #endif
 
+extern const char rinc_help[], rinc_license[]; /* (about.c) */
 int main(int argc, char **argv) {
   const char *apps[rinc_BUNDLE_MOST], *out = 0, *img = 0, *wavout = 0, *exp = 0, *web = 0, *runner = 0, *named = 0, *data = 0, *root = 0, *home = 0, *storage = 0, *app = 0;
   const char *installs[32]; int napps = 0, ninstall = 0, i, fn, frames = 0, game = 0, memReport = 0, opened = 0; uint32_t size = 0;
   char stem[40], *self = 0;
+  for (i = 1; i < argc; i++) { /* (these on their own) */
+    if (!strcmp(argv[i], "-help") || !strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) return fputs(rinc_help, stdout) < 0;
+    if (!strcmp(argv[i], "-license") || !strcmp(argv[i], "--license")) return fputs(rinc_license, stdout) < 0;
+  }
   for (i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "-o") && i + 1 < argc) out = argv[++i];
     else if (!strcmp(argv[i], "-frames") && i + 1 < argc) frames = atoi(argv[++i]);
@@ -483,7 +470,8 @@ int main(int argc, char **argv) {
       fprintf(stderr, "usage: rinc [app.rio | -app name] [-m] [-frames n] [-o screen.ppm] [-wav sound.wav] [-type text] [-i app.img]\n"
                       "       rinc app.rio... -export program [-runner rinc] [-home name] [-name folder]\n"
                       "       rinc app.rio... -web page.html [-home name]\n"
-                      "       rinc -install name|app.rio...      (and -data folder with any of these: storage there)\n");
+                      "       rinc -install name|app.rio...      (and -data folder with any of these: storage there)\n"
+                      "       rinc -help | -license\n");
       return 2;
     }
     else apps[napps++] = argv[i];

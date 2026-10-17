@@ -1,8 +1,9 @@
 # Builds and tests on every push and pull request:
 #   web      the web players (rinc.wasm, VM-only, and rinc-full.wasm, with the compiler), with zig: only
 #            CI needs zig
-#   desktop  rinc for Windows, macOS (universal) and Linux, with the web player built in, so rinc -web
-#            and rinc -export work without anything else installed; tests run every app headless
+#   desktop  rinc for Windows, macOS (universal) and Linux (x86-64 and arm64), with the web players
+#            built in, so rinc -web and rinc -export work without anything else installed; tests run
+#            every app headless
 #   board    rinc.uf2 for the Fruit Jam, with the Pico SDK and Arm's toolchain
 # A tag like v0.1.0 also publishes all of them as a GitHub release. Each night (if main changed since
 # the last one), and whenever it's run by hand (Actions > ci > Run workflow), they go to the rolling
@@ -71,14 +72,17 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            name: rinc-windows-x86_64.exe
+            name: windows-x86_64
             exe: build/Release/rinc.exe
           - os: macos-latest
-            name: rinc-macos-universal
+            name: macos-universal
             exe: build/rinc
             flags: '"-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"'
           - os: ubuntu-22.04 # (an older glibc: the binary runs on more Linux systems)
-            name: rinc-linux-x86_64
+            name: linux-x86_64
+            exe: build/rinc
+          - os: ubuntu-22.04-arm # (64-bit Arm: Raspberry Pi OS on a Pi 4 or 5, say)
+            name: linux-arm64
             exe: build/rinc
     runs-on: ${{ matrix.os }}
     steps:
@@ -102,13 +106,20 @@ jobs:
         run: cmake --build build --config Release --parallel
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
-      - name: Name the binary
+      - name: Package
         shell: bash
-        run: mkdir dist && cp ${{ matrix.exe }} dist/${{ matrix.name }}
+        run: |
+          # just the one program (rinc -help and rinc -license say the rest): rinc.exe zipped, or rinc in
+          # a gzipped tar (which keeps it executable)
+          version=$([ "$GITHUB_REF_TYPE" = tag ] && echo "$GITHUB_REF_NAME" || echo nightly)
+          name="rinc-$version-${{ matrix.name }}"
+          mkdir dist
+          if [ "${{ runner.os }}" = Windows ]; then 7z a "dist/$name.zip" ./${{ matrix.exe }} > /dev/null
+          else tar czf "dist/$name.tar.gz" -C build rinc; fi
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.name }}
-          path: dist/${{ matrix.name }}
+          name: rinc-${{ matrix.name }}
+          path: dist/*
 
   board:
     needs: check

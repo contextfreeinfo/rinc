@@ -1,7 +1,8 @@
 # Third-party code in Rinc
 
 Rinc's own code is dedicated to the public domain under CC0 1.0 (see LICENSE). These parts come from
-others and keep their own licenses; their notices travel with builds that include them.
+others and keep their own licenses; their notices travel with builds that include them (`rinc -license`
+on the desktop, and a comment in each web page).
 
 | What | Where | License |
 |---|---|---|
